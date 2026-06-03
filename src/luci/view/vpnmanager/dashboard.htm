@@ -1,0 +1,85 @@
+<%+header%>
+<style>
+:root {
+  --bg: #0f172a;
+  --panel: #111827;
+  --muted: #94a3b8;
+  --text: #e2e8f0;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --bad: #ef4444;
+}
+body { background: radial-gradient(circle at top right, #1e293b, #0b1020 70%); }
+.vm-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap: 12px; }
+.vm-card { background: var(--panel); color: var(--text); border-radius: 12px; padding: 14px; box-shadow: 0 10px 25px rgba(0,0,0,.25); }
+.vm-title { font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+.vm-value { font-size: 28px; font-weight: 700; }
+.vm-btn { border: 0; padding: 10px 14px; border-radius: 10px; background: #0ea5e9; color: white; cursor: pointer; }
+.vm-table { width: 100%; border-collapse: collapse; }
+.vm-table th, .vm-table td { border-bottom: 1px solid #1f2937; padding: 8px; text-align: left; color: var(--text); }
+</style>
+
+<div class="cbi-map">
+  <h2>VPN Manager Dashboard</h2>
+
+  <div class="vm-grid">
+    <div class="vm-card"><div class="vm-title">VPN Up</div><div id="vpn-up" class="vm-value">0</div></div>
+    <div class="vm-card"><div class="vm-title">VPN Down</div><div id="vpn-down" class="vm-value">0</div></div>
+    <div class="vm-card"><div class="vm-title">Actions</div><button class="vm-btn" onclick="applyCfg()">Apply</button> <button class="vm-btn" onclick="rollbackCfg()">Rollback</button></div>
+  </div>
+
+  <div class="vm-card" style="margin-top: 14px;">
+    <div class="vm-title">Profiles</div>
+    <table class="vm-table" id="profiles-table">
+      <thead><tr><th>Name</th><th>Endpoint</th><th>Status</th><th>Handshake Age</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const basePath = window.location.pathname.replace(/\/$/, '');
+
+function req(url, method) {
+  return fetch(url, { method: method || 'GET', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json());
+}
+
+function loadStatus() {
+  req(basePath + '/status').then(d => {
+    document.getElementById('vpn-up').innerText = d.up || 0;
+    document.getElementById('vpn-down').innerText = d.down || 0;
+  });
+}
+
+function loadProfiles() {
+  req(basePath + '/profiles').then(d => {
+    const tb = document.querySelector('#profiles-table tbody');
+    tb.innerHTML = '';
+    (d.profiles || []).forEach(p => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + p.name + '</td><td>' + p.endpoint + '</td><td>' + p.status + '</td><td>' + p.handshake_age + 's</td>';
+      tb.appendChild(tr);
+    });
+  });
+}
+
+function applyCfg() {
+  req(basePath + '/apply', 'POST').then(() => {
+    loadStatus();
+    loadProfiles();
+  });
+}
+
+function rollbackCfg() {
+  req(basePath + '/rollback', 'POST').then(() => {
+    loadStatus();
+    loadProfiles();
+  });
+}
+
+loadStatus();
+loadProfiles();
+setInterval(() => { loadStatus(); loadProfiles(); }, 10000);
+</script>
+
+<%+footer%>

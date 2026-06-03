@@ -1,0 +1,31 @@
+{
+  "vpn-manager": {
+    "description": "VPN Manager RPC ACL",
+    "read": {
+      "ubus": {
+        "vpn-manager": [
+          "status",
+          "list_profiles",
+          "list_devices",
+          "audit_log"
+        ]
+      }
+    },
+    "write": {
+      "ubus": {
+        "vpn-manager": [
+          "create_profile",
+          "update_profile",
+          "delete_profile",
+          "toggle_profile",
+          "import_profile",
+          "set_policy",
+          "bulk_policy",
+          "test_profile",
+          "apply",
+          "rollback"
+        ]
+      }
+    }
+  }
+}

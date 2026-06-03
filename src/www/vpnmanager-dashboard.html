@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VPN Manager</title>
+  <style>
+    :root {
+      --bg: #f4f8ff;
+      --bg-2: #eaf3ff;
+      --panel: #ffffff;
+      --line: #d7e3f4;
+      --text: #16304f;
+      --muted: #5f7593;
+      --primary: #0a84ff;
+      --primary-2: #00b8d9;
+      --ok: #0f9d58;
+      --warn: #d98600;
+      --bad: #d12f48;
+      --shadow: 0 16px 38px rgba(28, 61, 102, 0.12);
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI Variable", "Trebuchet MS", "Tahoma", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 90% 8%, #d8edff 0, #d8edff 18%, transparent 45%),
+        radial-gradient(circle at 8% 90%, #d9fff2 0, #d9fff2 15%, transparent 42%),
+        linear-gradient(160deg, var(--bg), var(--bg-2));
+      min-height: 100vh;
+      animation: pageIn .35s ease-out;
+    }
+
+    @keyframes pageIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .shell {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.3fr .7fr;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .hero-main {
+      background: linear-gradient(135deg, #0d7ef0, #18accf 72%);
+      color: #fff;
+      border-radius: 24px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-main:before {
+      content: "";
+      position: absolute;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, .18);
+      right: -40px;
+      top: -70px;
+    }
+
+    .hero h1 {
+      margin: 0 0 6px;
+      font-size: 30px;
+      letter-spacing: .2px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .hero p {
+      margin: 0;
+      color: rgba(255, 255, 255, .92);
+      position: relative;
+      z-index: 2;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 16px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .hero-side {
+      background: var(--panel);
+      border-radius: 24px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      background: #ebf5ff;
+      color: #1e4f7f;
+      width: max-content;
+    }
+
+    .chip .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .btn {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-weight: 700;
+      color: #fff;
+      background: linear-gradient(135deg, var(--primary), #009ff6);
+      cursor: pointer;
+      transition: .2s transform, .2s filter;
+    }
+
+    .btn:hover { transform: translateY(-1px); filter: brightness(1.03); }
+    .btn:active { transform: translateY(0); }
+    .btn.secondary { background: linear-gradient(135deg, #5f7593, #7d90ab); }
+    .btn.ghost { background: #eef5ff; color: #215384; }
+    .btn.warn { background: linear-gradient(135deg, #eb7e00, #ff9f1a); }
+    .btn.bad { background: linear-gradient(135deg, #ca2743, #f24b67); }
+    .btn.tiny { padding: 7px 10px; border-radius: 10px; font-size: 12px; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 14px;
+      animation: cardIn .3s ease-out;
+    }
+
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+    .value { margin-top: 6px; font-size: 30px; font-weight: 800; }
+    .value.small { font-size: 16px; font-weight: 700; line-height: 1.4; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .panel-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      gap: 10px;
+    }
+
+    h3 {
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: .2px;
+    }
+
+    .stack { display: grid; gap: 10px; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+
+    input[type="text"], input[type="file"], textarea, select {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid #ccdcf0;
+      background: #f8fbff;
+      color: var(--text);
+      padding: 10px;
+      font: inherit;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: #6db7ff;
+      box-shadow: 0 0 0 3px rgba(10, 132, 255, .14);
+    }
+
+    textarea { min-height: 140px; resize: vertical; }
+    .hint { font-size: 12px; color: var(--muted); }
+
+    .table-wrap { overflow-x: auto; border: 1px solid #dbe8f7; border-radius: 12px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 720px;
+      background: #fff;
+    }
+
+    th, td {
+      border-bottom: 1px solid #e6eef9;
+      text-align: left;
+      padding: 10px 9px;
+      vertical-align: middle;
+      font-size: 13px;
+    }
+
+    th {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      color: #5f7593;
+      background: #f7fbff;
+    }
+
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+
+    .badge.healthy { color: #0a7a44; background: #e8faef; border-color: #a7e6c3; }
+    .badge.degraded { color: #9b5f00; background: #fff4df; border-color: #ffd79c; }
+    .badge.down { color: #9b1831; background: #ffe8ee; border-color: #ffc3cf; }
+    .badge.wan { color: #1f4f7d; background: #e8f3ff; border-color: #b8d8ff; }
+    .badge.vpn { color: #08606b; background: #e5fbff; border-color: #afecf6; }
+    .badge.connected { color: #0a7a44; background: #e8faef; border-color: #a7e6c3; }
+    .badge.offline { color: #8b5e00; background: #fff4df; border-color: #ffd79c; }
+
+    .tools-row {
+      display: grid;
+      grid-template-columns: 1fr 180px;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .target-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pill {
+      border: 1px solid #c8dbf3;
+      background: #f8fbff;
+      color: #244f7a;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .pill.active {
+      background: linear-gradient(135deg, #0a84ff, #00a8ea);
+      border-color: #0a84ff;
+      color: #fff;
+    }
+    details.advanced {
+      border: 1px solid #dbe8f7;
+      border-radius: 12px;
+      background: #f8fbff;
+      padding: 10px;
+    }
+    details.advanced > summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: #215384;
+      outline: none;
+    }
+    .compact-note {
+      padding: 10px;
+      border-radius: 12px;
+      background: #edf6ff;
+      color: #24507d;
+      font-size: 13px;
+      border: 1px solid #d0e5ff;
+    }
+
+    .footer-actions {
+      margin-top: 10px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .toast {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      min-width: 220px;
+      max-width: 360px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      color: #fff;
+      font-weight: 700;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, .2);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: .2s ease;
+      z-index: 50;
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.ok { background: linear-gradient(135deg, #198754, #0fa36a); }
+    .toast.error { background: linear-gradient(135deg, #b8203d, #d7445d); }
+
+    @media (max-width: 980px) {
+      .hero { grid-template-columns: 1fr; }
+      .stats, .layout, .form-grid { grid-template-columns: 1fr; }
+      .value { font-size: 26px; }
+      .tools-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="hero">
+      <div class="hero-main">
+        <h1>VPN Manager</h1>
+        <p>Control WireGuard profiles, map devices, and enforce per-device VPN routing.</p>
+        <div class="hero-actions">
+          <button class="btn" onclick="refreshAll()">Refresh</button>
+          <button class="btn secondary" onclick="rollbackCfg()">Rollback Last</button>
+        </div>
+      </div>
+      <div class="hero-side">
+        <span class="chip"><span class="dot"></span> Live Control Panel</span>
+        <div>
+          <div class="label">Last Sync</div>
+          <div id="last-sync" class="value small">Ready</div>
+        </div>
+        <div class="hint">Policies can now remove VPN assignment instantly by switching target to WAN.</div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="card"><div class="label">VPN Healthy</div><div id="vpn-up" class="value">0</div></div>
+      <div class="card"><div class="label">VPN Down</div><div id="vpn-down" class="value">0</div></div>
+      <div class="card"><div class="label">Policies / Profiles</div><div id="policy-count" class="value">0</div><div id="profile-count" class="hint">0 profiles</div></div>
+    </div>
+
+    <div class="layout">
+      <div class="card stack">
+        <div class="panel-title">
+          <h3>Profile Manager</h3>
+        </div>
+        <div class="form-grid">
+          <input id="profile-id" type="text" placeholder="Profile ID, e.g. vpn_us_1">
+          <input id="profile-name" type="text" placeholder="Display name">
+          <input id="profile-endpoint-host" type="text" placeholder="Endpoint host">
+          <input id="profile-endpoint-port" type="text" placeholder="Endpoint port">
+          <input id="profile-address" type="text" placeholder="Address, e.g. 10.0.0.2/32">
+          <input id="profile-dns" type="text" placeholder="DNS, e.g. 10.0.0.1">
+          <input id="profile-allowed-ips" type="text" placeholder="Allowed IPs, e.g. 0.0.0.0/0">
+          <input id="profile-keepalive" type="text" placeholder="Keepalive, e.g. 25">
+          <input id="profile-mtu" type="text" placeholder="MTU (optional)">
+          <select id="profile-enabled">
+            <option value="1">Enabled</option>
+            <option value="0">Disabled</option>
+          </select>
+          <input id="profile-public-key" type="text" placeholder="Peer public key">
+          <input id="profile-private-key" type="text" placeholder="Private key (leave blank to keep)">
+        </div>
+        <div class="row-actions">
+          <button class="btn" onclick="saveProfile()">Save Profile</button>
+          <button class="btn ghost tiny" onclick="clearProfileForm()">Clear</button>
+        </div>
+
+        <details class="advanced">
+          <summary>Import from .conf</summary>
+          <div class="stack" style="margin-top:10px;">
+            <input id="import-file" type="file" accept=".conf,.txt">
+            <input id="import-id" type="text" placeholder="Profile ID, e.g. vpn_us_1">
+            <button class="btn" onclick="importConf()">Import Profile</button>
+          </div>
+        </details>
+
+        <div id="import-status" class="hint">Choose a file then import.</div>
+      </div>
+
+      <div class="card stack">
+        <div class="panel-title">
+          <h3>Quick Device Routing</h3>
+        </div>
+        <div class="compact-note">Dùng bảng Devices bên dưới để gán WAN/VPN chỉ với 1 lần bấm. Hệ thống sẽ tự apply ngay sau khi đổi.</div>
+        <details class="advanced">
+          <summary>Advanced: Create / Edit Policy</summary>
+          <div class="stack" style="margin-top:10px;">
+            <div class="form-grid">
+              <input id="policy-section" type="text" placeholder="Policy section">
+              <input id="policy-hostname" type="text" placeholder="Hostname (optional)">
+              <input id="policy-mac" type="text" placeholder="MAC address">
+              <input id="policy-ip" type="text" placeholder="IP address (optional)">
+              <select id="policy-target"></select>
+            </div>
+            <div class="row-actions">
+              <button class="btn" onclick="savePolicy()">Save Policy</button>
+              <button class="btn ghost tiny" onclick="clearPolicyForm()">Clear</button>
+            </div>
+          </div>
+        </details>
+        <div class="hint">Mặc định: thao tác 1 chạm trong Devices. Advanced chỉ dùng khi cần tinh chỉnh thủ công.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 12px;">
+      <div class="panel-title">
+        <h3>Profiles</h3>
+      </div>
+      <div class="table-wrap">
+        <table id="profiles-table">
+          <thead>
+            <tr><th>Name</th><th>ID</th><th>Endpoint</th><th>Status</th><th>Handshake Age</th><th>Actions</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="layout">
+      <div class="card">
+        <div class="panel-title">
+          <h3>Devices</h3>
+        </div>
+        <div class="tools-row">
+          <input id="device-search" type="text" placeholder="Search hostname / IP / MAC" oninput="renderDevices()">
+          <select id="device-filter" onchange="renderDevices()">
+            <option value="all">All</option>
+            <option value="connected">Connected</option>
+            <option value="offline">Offline</option>
+            <option value="vpn">Target VPN</option>
+            <option value="wan">Target WAN</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table id="devices-table">
+            <thead>
+              <tr><th>Hostname</th><th>IP</th><th>MAC</th><th>Connected</th><th>Current</th><th>1-Tap Route</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="panel-title">
+          <h3>Policies</h3>
+        </div>
+        <div class="table-wrap">
+          <table id="policies-table">
+            <thead>
+              <tr><th>Section</th><th>Hostname</th><th>MAC</th><th>IP</th><th>Target</th><th>Actions</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 12px;">
+      <div class="panel-title">
+        <h3>Audit Log</h3>
+      </div>
+      <textarea id="audit-log" readonly></textarea>
+      <div class="footer-actions">
+        <div class="hint">Auto-refresh every 8 seconds for status, profiles, devices, and policies.</div>
+        <button class="btn tiny ghost" onclick="loadAudit()">Refresh Log</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const basePath = window.location.pathname.replace(/\/$/, '');
+    const AUTO_APPLY = true;
+    let profileTargets = [{ value: 'wan', label: 'WAN' }];
+    let policyMap = {};
+    let profileMap = {};
+    let cachedDevices = [];
+    let cachedPolicies = [];
+
+    function h(v) {
+      return String(v || '').replace(/[&<>"']/g, function (s) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[s];
+      });
+    }
+
+    function showToast(message, ok) {
+      const t = document.getElementById('toast');
+      t.textContent = message;
+      t.className = 'toast show ' + (ok ? 'ok' : 'error');
+      window.clearTimeout(showToast._timer);
+      showToast._timer = window.setTimeout(() => { t.className = 'toast'; }, 2200);
+    }
+
+    function statusBadge(target) {
+      if (target === 'wan') {
+        return '<span class="badge wan">WAN</span>';
+      }
+      return '<span class="badge vpn">' + h(targetLabel(target)) + '</span>';
+    }
+
+    function connBadge(connected, state) {
+      if (connected) {
+        return '<span class="badge connected">Connected</span>';
+      }
+      const st = state && state !== 'unknown' ? (' (' + h(state) + ')') : '';
+      return '<span class="badge offline">Offline' + st + '</span>';
+    }
+
+    function healthBadge(status) {
+      const s = h(status || 'unknown');
+      return '<span class="badge ' + s + '">' + s + '</span>';
+    }
+
+    function apiGet(path) {
+      return fetch(basePath + path, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(r => r.json());
+    }
+
+    function apiPost(path, data) {
+      const body = new URLSearchParams(data || {}).toString();
+      return fetch(basePath + path, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: body
+      }).then(r => r.json());
+    }
+
+    function renderTargetOptions() {
+      document.querySelectorAll('select[data-target-for], #policy-target').forEach(sel => {
+        const keep = sel.value || 'wan';
+        sel.innerHTML = '';
+        profileTargets.forEach(target => {
+          const opt = document.createElement('option');
+          opt.value = target.value;
+          opt.textContent = target.label;
+          sel.appendChild(opt);
+        });
+        sel.value = profileTargets.some(t => t.value === keep) ? keep : 'wan';
+      });
+    }
+
+    function targetLabel(targetValue) {
+      const hit = profileTargets.find(t => t.value === targetValue);
+      if (!hit) {
+        return targetValue;
+      }
+      if (targetValue === 'wan') {
+        return 'WAN';
+      }
+      return hit.label.split(' [')[0];
+    }
+
+    function applyIfNeeded() {
+      if (!AUTO_APPLY) {
+        return Promise.resolve();
+      }
+      return apiPost('/apply', {}).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Apply failed');
+        }
+      });
+    }
+
+    function setDeviceTarget(section, mac, ip, hostname, target) {
+      return apiPost('/policy', {
+        section: section,
+        mac: mac,
+        ip: ip,
+        hostname: hostname,
+        target: target
+      }).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Update failed');
+        }
+        return applyIfNeeded();
+      }).then(() => {
+        showToast('Set ' + (hostname || mac) + ' -> ' + targetLabel(target), true);
+        return refreshAll();
+      }).catch(err => {
+        showToast(err.message || 'Update failed', false);
+      });
+    }
+
+    function loadStatus() {
+      return apiGet('/status').then(d => {
+        document.getElementById('vpn-up').textContent = d.up || 0;
+        document.getElementById('vpn-down').textContent = d.down || 0;
+        document.getElementById('last-sync').textContent = d.timestamp || 'Ready';
+      });
+    }
+
+    function loadProfiles() {
+      return apiGet('/profiles').then(d => {
+        const profiles = d.profiles || [];
+        profileMap = {};
+        document.getElementById('profile-count').textContent = profiles.length + ' profiles';
+        profileTargets = [{ value: 'wan', label: 'WAN (No VPN)' }].concat(profiles.map(p => ({
+          value: p.id,
+          label: (p.name ? p.name : p.id) + ' [' + p.id + ']'
+        })));
+        renderTargetOptions();
+
+        const tb = document.querySelector('#profiles-table tbody');
+        tb.innerHTML = '';
+        profiles.forEach(p => {
+          profileMap[p.id] = p;
+          const tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + h(p.name || p.id) + '</td>' +
+            '<td>' + h(p.id) + '</td>' +
+            '<td>' + h(p.endpoint || '') + '</td>' +
+            '<td>' + healthBadge(p.status) + '</td>' +
+            '<td>' + h(p.handshake_age) + 's</td>' +
+            '<td><div class="row-actions">' +
+            '<button class="btn tiny ghost" onclick="editProfile(\'' + h(p.id) + '\')">Edit</button>' +
+            '<button class="btn tiny" onclick="testProfile(\'' + h(p.id) + '\')">Test</button>' +
+            '<button class="btn tiny bad" onclick="deleteProfile(\'' + h(p.id) + '\')">Delete</button>' +
+            '</div></td>';
+          tb.appendChild(tr);
+        });
+      });
+    }
+
+    function clearProfileForm() {
+      document.getElementById('profile-id').value = '';
+      document.getElementById('profile-name').value = '';
+      document.getElementById('profile-endpoint-host').value = '';
+      document.getElementById('profile-endpoint-port').value = '';
+      document.getElementById('profile-address').value = '';
+      document.getElementById('profile-dns').value = '';
+      document.getElementById('profile-allowed-ips').value = '';
+      document.getElementById('profile-keepalive').value = '';
+      document.getElementById('profile-mtu').value = '';
+      document.getElementById('profile-public-key').value = '';
+      document.getElementById('profile-private-key').value = '';
+      document.getElementById('profile-enabled').value = '1';
+    }
+
+    function editProfile(id) {
+      const p = profileMap[id];
+      if (!p) {
+        return;
+      }
+
+      const endpoint = (p.endpoint || '').split(':');
+      document.getElementById('profile-id').value = p.id || '';
+      document.getElementById('profile-name').value = p.name || '';
+      document.getElementById('profile-endpoint-host').value = endpoint[0] || '';
+      document.getElementById('profile-endpoint-port').value = endpoint[1] || '';
+      document.getElementById('profile-address').value = p.address || '';
+      document.getElementById('profile-dns').value = p.dns || '';
+      document.getElementById('profile-allowed-ips').value = p.allowed_ips || '0.0.0.0/0';
+      document.getElementById('profile-keepalive').value = p.persistent_keepalive || '25';
+      document.getElementById('profile-mtu').value = p.mtu || '';
+      document.getElementById('profile-public-key').value = p.public_key || '';
+      document.getElementById('profile-private-key').value = '';
+      document.getElementById('profile-enabled').value = p.enabled === '0' ? '0' : '1';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function saveProfile() {
+      const id = document.getElementById('profile-id').value.trim();
+      if (!id) {
+        showToast('Profile ID is required', false);
+        return;
+      }
+
+      apiPost('/profile', {
+        id: id,
+        name: document.getElementById('profile-name').value.trim(),
+        endpoint_host: document.getElementById('profile-endpoint-host').value.trim(),
+        endpoint_port: document.getElementById('profile-endpoint-port').value.trim(),
+        public_key: document.getElementById('profile-public-key').value.trim(),
+        private_key: document.getElementById('profile-private-key').value.trim(),
+        address: document.getElementById('profile-address').value.trim(),
+        dns: document.getElementById('profile-dns').value.trim(),
+        allowed_ips: document.getElementById('profile-allowed-ips').value.trim(),
+        mtu: document.getElementById('profile-mtu').value.trim(),
+        persistent_keepalive: document.getElementById('profile-keepalive').value.trim(),
+        enabled: document.getElementById('profile-enabled').value,
+        preshared_key: ''
+      }).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Save profile failed');
+        }
+        return applyIfNeeded().then(() => ({ applied: true })).catch(err => ({ applied: false, error: err }));
+      }).then(info => {
+        return refreshAll().then(() => {
+          if (info && info.applied === false) {
+            showToast('Profile saved, but apply failed: ' + ((info.error && info.error.message) ? info.error.message : 'unknown'), false);
+            return;
+          }
+          showToast('Profile saved', true);
+        });
+      }).catch(err => {
+        showToast(err.message || 'Save profile failed', false);
+      });
+    }
+
+    function testProfile(id) {
+      apiPost('/test', { id: id }).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Test failed');
+        }
+        const state = res.state || 'unknown';
+        const latency = res.latency || 'n/a';
+        showToast('Test ' + id + ': ' + state + ', ' + latency, true);
+      }).catch(err => {
+        showToast(err.message || 'Test failed', false);
+      });
+    }
+
+    function deleteProfile(id) {
+      if (!window.confirm('Delete profile ' + id + '?')) {
+        return;
+      }
+
+      apiPost('/profile_delete', { id: id }).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Delete profile failed');
+        }
+        return applyIfNeeded().then(() => {
+          showToast('Profile deleted', true);
+          return refreshAll();
+        });
+      }).catch(err => {
+        showToast(err.message || 'Delete profile failed', false);
+      });
+    }
+
+    function loadDevices() {
+      return Promise.all([apiGet('/devices'), apiGet('/policies')]).then(results => {
+        cachedDevices = results[0].devices || [];
+        cachedPolicies = results[1].policies || [];
+        renderDevices();
+      });
+    }
+
+    function renderDevices() {
+      const targetByMac = {};
+      cachedPolicies.forEach(p => {
+        if (p.mac) {
+          targetByMac[p.mac.toLowerCase()] = p.target || 'wan';
+        }
+      });
+
+      const q = (document.getElementById('device-search') ? document.getElementById('device-search').value : '').trim().toLowerCase();
+      const f = (document.getElementById('device-filter') ? document.getElementById('device-filter').value : 'all');
+
+      const tb = document.querySelector('#devices-table tbody');
+      tb.innerHTML = '';
+
+      cachedDevices.forEach(dev => {
+        const mac = (dev.mac || '').toLowerCase();
+        const ip = dev.ip || '';
+        const host = dev.hostname || 'unknown';
+        const state = dev.state || 'unknown';
+        const connected = !!dev.connected;
+        const defaultTarget = targetByMac[mac] || 'wan';
+
+        const hay = (host + ' ' + ip + ' ' + mac).toLowerCase();
+        if (q && hay.indexOf(q) === -1) {
+          return;
+        }
+        if (f === 'connected' && !connected) {
+          return;
+        }
+        if (f === 'offline' && connected) {
+          return;
+        }
+        if (f === 'vpn' && defaultTarget === 'wan') {
+          return;
+        }
+        if (f === 'wan' && defaultTarget !== 'wan') {
+          return;
+        }
+
+        const section = 'policy_' + mac.replace(/:/g, '').replace(/[^a-z0-9_]/g, '');
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td>' + h(host) + '</td>' +
+          '<td>' + h(ip) + '</td>' +
+          '<td>' + h(dev.mac || '') + '</td>' +
+          '<td>' + connBadge(connected, state) + '</td>' +
+          '<td>' + statusBadge(defaultTarget) + '</td>' +
+          '<td><div class="target-pills"></div></td>';
+        tb.appendChild(tr);
+
+        const pills = tr.querySelector('.target-pills');
+        profileTargets.forEach(t => {
+          const btn = document.createElement('button');
+          btn.className = 'pill' + (t.value === defaultTarget ? ' active' : '');
+          btn.textContent = targetLabel(t.value);
+          btn.onclick = function () {
+            setDeviceTarget(section, dev.mac || '', dev.ip || '', dev.hostname || '', t.value);
+          };
+          pills.appendChild(btn);
+        });
+      });
+    }
+
+    function loadPolicies() {
+      return apiGet('/policies').then(d => {
+        const policies = d.policies || [];
+        policyMap = {};
+        document.getElementById('policy-count').textContent = policies.length;
+
+        const tb = document.querySelector('#policies-table tbody');
+        tb.innerHTML = '';
+
+        policies.forEach(p => {
+          policyMap[p.section] = p;
+          const tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + h(p.section) + '</td>' +
+            '<td>' + h(p.hostname || '') + '</td>' +
+            '<td>' + h(p.mac || '') + '</td>' +
+            '<td>' + h(p.ip || '') + '</td>' +
+            '<td>' + statusBadge(p.target || 'wan') + '</td>' +
+            '<td><div class="row-actions">' +
+            '<button class="btn tiny warn" onclick="movePolicyToWan(\'' + h(p.section) + '\')">Remove VPN</button>' +
+            '<button class="btn tiny ghost" onclick="editPolicy(\'' + h(p.section) + '\')">Edit</button>' +
+            '<button class="btn tiny bad" onclick="deletePolicy(\'' + h(p.section) + '\')">Delete</button>' +
+            '</div></td>';
+          tb.appendChild(tr);
+        });
+      });
+    }
+
+    function loadAudit() {
+      return apiGet('/audit').then(d => {
+        document.getElementById('audit-log').value = (d.lines || []).join('\n');
+      });
+    }
+
+    function importConf() {
+      const fileInput = document.getElementById('import-file');
+      const profileId = document.getElementById('import-id').value.trim() || 'vpn_' + Date.now();
+      const status = document.getElementById('import-status');
+
+      if (!fileInput.files || !fileInput.files.length) {
+        status.textContent = 'Please choose a .conf file first.';
+        showToast('Missing import file', false);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function () {
+        apiPost('/import', { id: profileId, content: reader.result || '' })
+          .then(res => {
+            if (res.ok === false) {
+              throw new Error(res.error || 'Import failed');
+            }
+            status.textContent = 'Imported as ' + profileId;
+            return applyIfNeeded().then(() => {
+              showToast('Profile imported and applied', true);
+              return refreshAll();
+            });
+          })
+          .catch(err => {
+            status.textContent = err.message || 'Import failed.';
+            showToast('Import failed', false);
+          });
+      };
+      reader.readAsText(fileInput.files[0]);
+    }
+
+    function savePolicy() {
+      const section = document.getElementById('policy-section').value.trim() || ('policy_' + Date.now());
+      const mac = document.getElementById('policy-mac').value.trim();
+      const target = document.getElementById('policy-target').value || 'wan';
+      if (!mac) {
+        showToast('MAC address is required', false);
+        return;
+      }
+
+      apiPost('/policy', {
+        section: section,
+        mac: mac,
+        ip: document.getElementById('policy-ip').value.trim(),
+        hostname: document.getElementById('policy-hostname').value.trim(),
+        target: target
+      }).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Save failed');
+        }
+        return applyIfNeeded().then(() => {
+          showToast('Policy saved', true);
+          return refreshAll();
+        });
+      }).catch(err => {
+        showToast(err.message || 'Policy save failed', false);
+      });
+    }
+
+    function clearPolicyForm() {
+      document.getElementById('policy-section').value = '';
+      document.getElementById('policy-hostname').value = '';
+      document.getElementById('policy-mac').value = '';
+      document.getElementById('policy-ip').value = '';
+      document.getElementById('policy-target').value = 'wan';
+    }
+
+    function editPolicy(section) {
+      const p = policyMap[section];
+      if (!p) {
+        return;
+      }
+      document.getElementById('policy-section').value = p.section || '';
+      document.getElementById('policy-hostname').value = p.hostname || '';
+      document.getElementById('policy-mac').value = p.mac || '';
+      document.getElementById('policy-ip').value = p.ip || '';
+      document.getElementById('policy-target').value = p.target || 'wan';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function movePolicyToWan(section) {
+      const p = policyMap[section];
+      if (!p) {
+        return;
+      }
+
+      setDeviceTarget(p.section, p.mac, p.ip || '', p.hostname || '', 'wan');
+    }
+
+    function deletePolicy(section) {
+      if (!window.confirm('Delete policy ' + section + '?')) {
+        return;
+      }
+
+      apiPost('/policy_delete', { section: section }).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Delete failed');
+        }
+        return applyIfNeeded().then(() => {
+          showToast('Policy deleted', true);
+          return refreshAll();
+        });
+      }).catch(err => {
+        showToast(err.message || 'Delete failed', false);
+      });
+    }
+
+    function applyCfg() {
+      apiPost('/apply', {}).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Apply failed');
+        }
+        showToast('Configuration applied', true);
+        return refreshAll();
+      }).catch(err => {
+        showToast(err.message || 'Apply failed', false);
+      });
+    }
+
+    function rollbackCfg() {
+      apiPost('/rollback', {}).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Rollback failed');
+        }
+        showToast('Rollback done', true);
+        return refreshAll();
+      }).catch(err => {
+        showToast(err.message || 'Rollback failed', false);
+      });
+    }
+
+    function refreshAll() {
+      return loadStatus()
+        .then(loadProfiles)
+        .then(loadPolicies)
+        .then(loadDevices)
+        .catch(() => {
+          showToast('Failed to refresh dashboard', false);
+        });
+    }
+
+    refreshAll();
+    loadAudit();
+    setInterval(() => {
+      refreshAll();
+    }, 8000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,199 @@
+openapi: 3.0.3
+info:
+  title: OpenWrt VPN Manager API
+  version: 1.0.0
+servers:
+  - url: /ubus/vpn-manager
+paths:
+  /profiles:
+    get:
+      summary: List VPN profiles
+      responses:
+        '200':
+          description: OK
+    post:
+      summary: Create profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileCreate'
+      responses:
+        '200':
+          description: Created
+  /profiles/{id}:
+    put:
+      summary: Update profile
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdate'
+      responses:
+        '200':
+          description: Updated
+    delete:
+      summary: Delete profile
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+  /profiles/import:
+    post:
+      summary: Import WireGuard config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                conf:
+                  type: string
+      responses:
+        '200':
+          description: Imported
+  /profiles/{id}/toggle:
+    post:
+      summary: Enable or disable profile
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Toggled
+  /profiles/{id}/test:
+    post:
+      summary: Test profile connectivity and latency
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Test result
+  /devices:
+    get:
+      summary: List discovered LAN devices
+      responses:
+        '200':
+          description: OK
+  /policies:
+    post:
+      summary: Set per-device route target
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DevicePolicy'
+      responses:
+        '200':
+          description: Updated
+  /policies/bulk:
+    post:
+      summary: Bulk assign policies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/DevicePolicy'
+      responses:
+        '200':
+          description: Updated
+  /apply:
+    post:
+      summary: Validate, commit, and apply staged config
+      responses:
+        '200':
+          description: Applied
+  /rollback:
+    post:
+      summary: Rollback latest checkpoint
+      responses:
+        '200':
+          description: Rolled back
+  /status:
+    get:
+      summary: Dashboard status
+      responses:
+        '200':
+          description: OK
+  /logs/audit:
+    get:
+      summary: Read audit log
+      responses:
+        '200':
+          description: OK
+components:
+  schemas:
+    ProfileCreate:
+      type: object
+      required: [name, endpoint_host, endpoint_port, private_key, public_key]
+      properties:
+        name:
+          type: string
+        endpoint_host:
+          type: string
+        endpoint_port:
+          type: integer
+        private_key:
+          type: string
+        public_key:
+          type: string
+        allowed_ips:
+          type: array
+          items:
+            type: string
+        kill_switch:
+          type: boolean
+    ProfileUpdate:
+      allOf:
+        - $ref: '#/components/schemas/ProfileCreate'
+    DevicePolicy:
+      type: object
+      required: [mac, target]
+      properties:
+        mac:
+          type: string
+        ip:
+          type: string
+        hostname:
+          type: string
+        target:
+          type: string
+          description: wan or profile section id
+        enabled:
+          type: boolean
