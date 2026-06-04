@@ -45,6 +45,18 @@ vm_profile_list() {
     uci -q show "$VM_CFG" | sed -n 's/^vpn-manager\.\([^.=]*\)=profile$/\1/p'
 }
 
+vm_global_ensure() {
+    uci -q get "$VM_CFG.global" >/dev/null 2>&1 || uci set "$VM_CFG.global=global"
+}
+
+vm_global_get() {
+    uci -q get "$VM_CFG.global.$1"
+}
+
+vm_global_set() {
+    uci set "$VM_CFG.global.$1=$2"
+}
+
 vm_profile_by_iface() {
     local iface="$1"
     local sec

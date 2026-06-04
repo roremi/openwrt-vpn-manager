@@ -8,6 +8,215 @@ json_escape() {
     echo "$1" | sed 's/"/\\"/g'
 }
 
+http_json_request() {
+    method="$1"
+    url="$2"
+    api_key="$3"
+    body="${4:-}"
+    headers_file="$VM_STATE_DIR/http-headers.$$"
+    body_file="$VM_STATE_DIR/http-body.$$"
+
+    vm_init_dirs
+    rm -f "$headers_file" "$body_file"
+
+    if [ -n "$body" ]; then
+        curl -sS -X "$method" \
+            -H "x-api-key: $api_key" \
+            -H "Content-Type: application/json" \
+            --data "$body" \
+            -D "$headers_file" \
+            -o "$body_file" \
+            "$url" >/dev/null 2>&1 || {
+            rm -f "$headers_file" "$body_file"
+            return 1
+        }
+    else
+        curl -sS -X "$method" \
+            -H "x-api-key: $api_key" \
+            -D "$headers_file" \
+            -o "$body_file" \
+            "$url" >/dev/null 2>&1 || {
+            rm -f "$headers_file" "$body_file"
+            return 1
+        }
+    fi
+
+    status_code="$(awk 'toupper($1) ~ /^HTTP\// { code=$2 } END { print code }' "$headers_file")"
+    body_text="$(cat "$body_file" 2>/dev/null || true)"
+    rm -f "$headers_file" "$body_file"
+
+    case "$status_code" in
+        2*) printf '%s' "$body_text" ;;
+        *)
+            error_msg="$(printf '%s' "$body_text" | jq -r '.error // .message // .detail // empty' 2>/dev/null || true)"
+            [ -n "$error_msg" ] || error_msg="HTTP ${status_code:-000} request failed"
+            echo "$error_msg" >&2
+            return 1
+            ;;
+    esac
+}
+
+multiebay_pick_gateway_name() {
+    jq -r '[
+        .name,
+        .gateway_name,
+        .gatewayName,
+        (if (.gateway | type) == "string" then .gateway else empty end),
+        .gateway.name,
+        .data.name,
+        .data.gateway_name,
+        .data.gatewayName,
+        (if (.data.gateway | type) == "string" then .data.gateway else empty end),
+        .data.gateway.name,
+        .result.name,
+        .result.gateway_name,
+        .result.gatewayName,
+        (if (.result.gateway | type) == "string" then .result.gateway else empty end),
+        .result.gateway.name
+    ] | map(select(type == "string" and length > 0)) | .[0] // ""' 2>/dev/null
+}
+
+multiebay_pick_wg_name() {
+    jq -r '[
+        .wg_name,
+        .wgName,
+        .name,
+        .client_name,
+        .data.wg_name,
+        .data.wgName,
+        .data.name,
+        .result.wg_name,
+        .result.wgName,
+        .result.name
+    ] | map(select(type == "string" and length > 0)) | .[0] // ""' 2>/dev/null
+}
+
+multiebay_pick_conf() {
+    jq -r '[
+        .conf,
+        .config,
+        .wg_conf,
+        .data.conf,
+        .data.config,
+        .data.wg_conf,
+        .result.conf,
+        .result.config,
+        .result.wg_conf
+    ] | map(select(type == "string" and length > 0)) | .[0] // ""' 2>/dev/null
+}
+
+multiebay_lookup_gateway_by_proxy() {
+    proxy_url="$1"
+    proxy_user="$(echo "$proxy_url" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#:.*@.*$##')"
+    proxy_hostport="$(echo "$proxy_url" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#^[^@]+@##')"
+    proxy_scheme="$(echo "$proxy_url" | sed -E 's#^([a-zA-Z0-9+.-]+)://.*#\1#')"
+    jq -r \
+        --arg proxy "$proxy_url" \
+        --arg proxy_prefix "${proxy_scheme}://${proxy_user}:" \
+        --arg proxy_suffix "@${proxy_hostport}" \
+        '[
+        (.proxies[]? | select((.proxy_url // .proxy // .upstream // .url // "") == $proxy) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
+        (.items[]? | select((.proxy_url // .proxy // .upstream // .url // "") == $proxy) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
+        (.data[]? | select((.proxy_url // .proxy // .upstream // .url // "") == $proxy) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
+        (.gateways[]? | select(
+            ((.proxy_url // .proxy // .upstream // .url // "") == $proxy) or
+            (((.proxy_display // "") | startswith($proxy_prefix)) and ((.proxy_display // "") | endswith($proxy_suffix)))
+        ) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty))
+    ] | map(select(type == "string" and length > 0)) | .[0] // ""' 2>/dev/null
+}
+
+urlencode() {
+    jq -nr --arg v "$1" '$v|@uri'
+}
+
+multiebay_slug() {
+    echo "$1" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//' | cut -c1-24
+}
+
+multiebay_proxy_to_url() {
+    raw="$(echo "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    [ -n "$raw" ] || return 1
+
+    case "$raw" in
+        *://*)
+            printf '%s' "$raw"
+            return 0
+            ;;
+    esac
+
+    if echo "$raw" | grep -Eq '^[^:]+:[0-9]+:[^:]+:.+$'; then
+        host="${raw%%:*}"
+        rest="${raw#*:}"
+        port="${rest%%:*}"
+        rest="${rest#*:}"
+        user="${rest%%:*}"
+        pass="${rest#*:}"
+        printf 'socks5://%s:%s@%s:%s' "$user" "$pass" "$host" "$port"
+        return 0
+    fi
+
+    if echo "$raw" | grep -Eq '^[^@]+@[^:]+:[0-9]+$'; then
+        printf 'socks5://%s' "$raw"
+        return 0
+    fi
+
+    if echo "$raw" | grep -Eq '^[^:]+:[0-9]+$'; then
+        printf 'socks5://%s' "$raw"
+        return 0
+    fi
+
+    return 1
+}
+
+multiebay_proxy_host() {
+    proxy_url="$1"
+    echo "$proxy_url" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#^[^@]+@##; s#[:/].*$##'
+}
+
+list_multiebay_settings() {
+    vm_global_ensure
+    api_base="$(vm_global_get multiebay_api_base)"
+    api_key="$(vm_global_get multiebay_api_key)"
+    allow_http_proxy="$(vm_global_get multiebay_allow_http_proxy)"
+    api_key_saved="false"
+    [ -n "$api_key" ] && api_key_saved="true"
+
+    [ -n "$api_base" ] || api_base="https://multiebay.com"
+    [ -n "$allow_http_proxy" ] || allow_http_proxy="1"
+
+    printf '{"ok":true,"api_base":"%s","api_key_saved":%s,"api_key":"%s","allow_http_proxy":"%s"}' \
+        "$(json_escape "$api_base")" \
+        "$api_key_saved" \
+        "$(json_escape "$api_key")" \
+        "$(json_escape "$allow_http_proxy")"
+}
+
+save_multiebay_settings() {
+    api_base="$2"
+    api_key="$3"
+    allow_http_proxy="$4"
+
+    vm_global_ensure
+    [ -n "$api_base" ] || api_base="https://multiebay.com"
+    [ -n "$allow_http_proxy" ] || allow_http_proxy="1"
+
+    vm_global_set multiebay_api_base "$api_base"
+    vm_global_set multiebay_allow_http_proxy "$allow_http_proxy"
+    if [ -n "$api_key" ]; then
+        vm_global_set multiebay_api_key "$api_key"
+    fi
+
+    uci commit vpn-manager
+    echo '{"ok":true}'
+}
+
+clear_multiebay_api_key() {
+    vm_global_ensure
+    uci -q delete vpn-manager.global.multiebay_api_key
+    uci commit vpn-manager
+    echo '{"ok":true}'
+}
+
 list_profiles() {
     printf '{"profiles":['
     first=1
@@ -367,6 +576,127 @@ import_profile() {
     echo '{"ok":true}'
 }
 
+create_multiebay_profile() {
+    sec="$2"
+    api_base="$3"
+    api_key="$4"
+    proxy_url="$5"
+    gateway_name="$6"
+    client_name="$7"
+    profile_name="$8"
+    allow_http_proxy="$9"
+
+    vm_global_ensure
+    [ -n "$api_base" ] || api_base="$(vm_global_get multiebay_api_base)"
+    [ -n "$api_key" ] || api_key="$(vm_global_get multiebay_api_key)"
+    [ -n "$allow_http_proxy" ] || allow_http_proxy="$(vm_global_get multiebay_allow_http_proxy)"
+
+    if [ -n "$proxy_url" ]; then
+        proxy_url="$(multiebay_proxy_to_url "$proxy_url" 2>/dev/null || true)"
+        [ -n "$proxy_url" ] || {
+            echo '{"ok":false,"error":"unsupported proxy format; use ip:port:user:pass or socks5://user:pass@host:port"}'
+            return
+        }
+    fi
+
+    if [ -z "$sec" ]; then
+        seed_host="$(multiebay_slug "$(multiebay_proxy_host "$proxy_url")")"
+        [ -n "$seed_host" ] || seed_host="proxy"
+        sec="vpn_${seed_host}_$(date +%H%M%S)"
+    fi
+
+    [ -n "$api_key" ] || {
+        echo '{"ok":false,"error":"missing api key"}'
+        return
+    }
+
+    [ -n "$proxy_url" ] || [ -n "$gateway_name" ] || {
+        echo '{"ok":false,"error":"proxy url or gateway name is required"}'
+        return
+    }
+
+    vm_require_cmd curl >/dev/null 2>&1 || {
+        echo '{"ok":false,"error":"missing command: curl"}'
+        return
+    }
+    vm_require_cmd jq >/dev/null 2>&1 || {
+        echo '{"ok":false,"error":"missing command: jq"}'
+        return
+    }
+
+    api_base="${api_base%/}"
+    [ -n "$api_base" ] || api_base="https://multiebay.com"
+    [ -n "$client_name" ] || client_name="$sec"
+    [ -n "$profile_name" ] || profile_name="$sec"
+
+    if [ "$allow_http_proxy" = "1" ] || [ "$allow_http_proxy" = "true" ] || [ "$allow_http_proxy" = "yes" ]; then
+        allow_http_proxy_json="true"
+    else
+        allow_http_proxy_json="false"
+    fi
+
+    if ! http_json_request "GET" "$api_base/api/key/me" "$api_key" >/dev/null 2>&1; then
+        echo '{"ok":false,"error":"unable to validate MultiEbay API key"}'
+        return
+    fi
+
+    if [ -n "$gateway_name" ] && [ -n "$proxy_url" ]; then
+        proxy_payload="$(jq -cn --arg proxy_url "$proxy_url" --argjson allow_http_proxy "$allow_http_proxy_json" '{proxy_url:$proxy_url, allow_http_proxy:$allow_http_proxy}')"
+        if ! http_json_request "PUT" "$api_base/api/customer/proxy/$(urlencode "$gateway_name")" "$api_key" "$proxy_payload" >/dev/null 2>&1; then
+            echo '{"ok":false,"error":"unable to update MultiEbay gateway proxy"}'
+            return
+        fi
+    elif [ -z "$gateway_name" ]; then
+        proxy_payload="$(jq -cn --arg proxy_url "$proxy_url" --argjson allow_http_proxy "$allow_http_proxy_json" '{proxy_url:$proxy_url, allow_http_proxy:$allow_http_proxy}')"
+        gateway_resp="$(http_json_request "POST" "$api_base/api/customer/proxy" "$api_key" "$proxy_payload" 2>/dev/null || true)"
+        gateway_name="$(printf '%s' "$gateway_resp" | multiebay_pick_gateway_name)"
+
+        if [ -z "$gateway_name" ]; then
+            proxies_resp="$(http_json_request "GET" "$api_base/api/customer/proxies" "$api_key" 2>/dev/null || true)"
+            gateway_name="$(printf '%s' "$proxies_resp" | multiebay_lookup_gateway_by_proxy "$proxy_url")"
+        fi
+
+        if [ -z "$gateway_name" ]; then
+            echo '{"ok":false,"error":"unable to determine created gateway name from MultiEbay"}'
+            return
+        fi
+    fi
+
+    wg_payload="$(jq -cn --arg client_name "$client_name" '{client_name:$client_name}')"
+    wg_resp="$(http_json_request "POST" "$api_base/api/customer/gateway/$(urlencode "$gateway_name")/wg-client" "$api_key" "$wg_payload" 2>/dev/null || true)"
+    wg_conf="$(printf '%s' "$wg_resp" | multiebay_pick_conf)"
+    wg_name="$(printf '%s' "$wg_resp" | multiebay_pick_wg_name)"
+
+    if [ -z "$wg_conf" ] && [ -n "$wg_name" ]; then
+        wg_detail_resp="$(http_json_request "GET" "$api_base/api/customer/wg/client/$(urlencode "$wg_name")" "$api_key" 2>/dev/null || true)"
+        wg_conf="$(printf '%s' "$wg_detail_resp" | multiebay_pick_conf)"
+    fi
+
+    if [ -z "$wg_conf" ]; then
+        echo '{"ok":false,"error":"MultiEbay did not return a WireGuard config"}'
+        return
+    fi
+
+    tmp_conf="$VM_STATE_DIR/multiebay-${sec}-$$.conf"
+    printf '%s\n' "$wg_conf" > "$tmp_conf"
+
+    if ! import_profile import_profile "$sec" "$tmp_conf" >/dev/null 2>&1; then
+        rm -f "$tmp_conf"
+        echo '{"ok":false,"error":"unable to import WireGuard config into router"}'
+        return
+    fi
+
+    rm -f "$tmp_conf"
+    vm_profile_set "$sec" "name" "$profile_name"
+    uci commit vpn-manager
+    uci commit network
+
+    printf '{"ok":true,"id":"%s","gateway_name":"%s","wg_name":"%s"}' \
+        "$(json_escape "$sec")" \
+        "$(json_escape "$gateway_name")" \
+        "$(json_escape "$wg_name")"
+}
+
 case "$1" in
     list_profiles) list_profiles ;;
     list_devices) list_devices ;;
@@ -380,6 +710,10 @@ case "$1" in
     delete_profile) delete_profile "$@" ;;
     test_profile) test_profile "$@" ;;
     import_profile) import_profile "$@" ;;
+    list_multiebay_settings) list_multiebay_settings ;;
+    save_multiebay_settings) save_multiebay_settings "$@" ;;
+    clear_multiebay_api_key) clear_multiebay_api_key ;;
+    create_multiebay_profile) create_multiebay_profile "$@" ;;
     apply) apply_changes ;;
     rollback) rollback_changes ;;
     *) echo '{"error":"unsupported method"}' ;;

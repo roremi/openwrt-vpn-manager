@@ -10,6 +10,7 @@ need_cmd() {
 install_with_apk() {
     apk update
     apk add \
+        curl \
         wireguard-tools \
         kmod-wireguard \
         nftables \
@@ -18,6 +19,7 @@ install_with_apk() {
         rpcd \
         ucode \
         luci-base \
+        ca-certificates \
         openssh-sftp-server \
         coreutils-install
 }
@@ -25,6 +27,8 @@ install_with_apk() {
 install_with_opkg() {
     opkg update
     opkg install \
+        curl \
+        ca-bundle \
         wireguard-tools \
         kmod-wireguard \
         nftables \

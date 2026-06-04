@@ -18,6 +18,10 @@ function index()
     entry({"admin", "services", "vpnmanager", "profile_delete"}, call("rpc_profile_delete")).leaf = true
     entry({"admin", "services", "vpnmanager", "test"}, call("rpc_test")).leaf = true
     entry({"admin", "services", "vpnmanager", "import"}, call("rpc_import")).leaf = true
+    entry({"admin", "services", "vpnmanager", "multiebay_settings"}, call("rpc_multiebay_settings")).leaf = true
+    entry({"admin", "services", "vpnmanager", "multiebay_settings_save"}, call("rpc_multiebay_settings_save")).leaf = true
+    entry({"admin", "services", "vpnmanager", "multiebay_settings_clear"}, call("rpc_multiebay_settings_clear")).leaf = true
+    entry({"admin", "services", "vpnmanager", "multiebay_import"}, call("rpc_multiebay_import")).leaf = true
     entry({"admin", "services", "vpnmanager", "apply"}, call("rpc_apply")).leaf = true
     entry({"admin", "services", "vpnmanager", "rollback"}, call("rpc_rollback")).leaf = true
 end
@@ -149,6 +153,50 @@ function rpc_import()
     end
 
     run_rpc("import_profile " .. sq(id) .. " " .. sq(path))
+end
+
+function rpc_multiebay_import()
+    local id = luci.http.formvalue("id") or ""
+    local api_base = luci.http.formvalue("api_base") or "https://multiebay.com"
+    local api_key = luci.http.formvalue("api_key") or ""
+    local proxy_url = luci.http.formvalue("proxy_url") or ""
+    local gateway_name = luci.http.formvalue("gateway_name") or ""
+    local client_name = luci.http.formvalue("client_name") or ""
+    local profile_name = luci.http.formvalue("profile_name") or ""
+    local allow_http_proxy = luci.http.formvalue("allow_http_proxy") or "1"
+
+    run_rpc(
+        "create_multiebay_profile " ..
+        sq(id) .. " " ..
+        sq(api_base) .. " " ..
+        sq(api_key) .. " " ..
+        sq(proxy_url) .. " " ..
+        sq(gateway_name) .. " " ..
+        sq(client_name) .. " " ..
+        sq(profile_name) .. " " ..
+        sq(allow_http_proxy)
+    )
+end
+
+function rpc_multiebay_settings()
+    run_rpc("list_multiebay_settings")
+end
+
+function rpc_multiebay_settings_save()
+    local api_base = luci.http.formvalue("api_base") or "https://multiebay.com"
+    local api_key = luci.http.formvalue("api_key") or ""
+    local allow_http_proxy = luci.http.formvalue("allow_http_proxy") or "1"
+
+    run_rpc(
+        "save_multiebay_settings " ..
+        sq(api_base) .. " " ..
+        sq(api_key) .. " " ..
+        sq(allow_http_proxy)
+    )
+end
+
+function rpc_multiebay_settings_clear()
+    run_rpc("clear_multiebay_api_key")
 end
 
 function rpc_apply()

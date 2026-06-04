@@ -198,7 +198,7 @@
     .stack { display: grid; gap: 10px; }
     .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
 
-    input[type="text"], input[type="file"], textarea, select {
+    input[type="text"], input[type="password"], input[type="file"], textarea, select {
       width: 100%;
       border-radius: 12px;
       border: 1px solid #ccdcf0;
@@ -269,6 +269,8 @@
 
     .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .target-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .target-compact { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
+    .target-compact-actions { display: flex; gap: 6px; }
     .pill {
       border: 1px solid #c8dbf3;
       background: #f8fbff;
@@ -283,6 +285,12 @@
       background: linear-gradient(135deg, #0a84ff, #00a8ea);
       border-color: #0a84ff;
       color: #fff;
+    }
+    .route-select {
+      min-width: 170px;
+      padding: 7px 10px;
+      font-size: 12px;
+      border-radius: 10px;
     }
     details.advanced {
       border: 1px solid #dbe8f7;
@@ -407,7 +415,38 @@
           </div>
         </details>
 
+        <details class="advanced">
+          <summary>MultiEbay Quick Import</summary>
+          <div class="stack" style="margin-top:10px;">
+            <div class="compact-note">Thiết lập API key một lần trên router. Sau đó chỉ cần paste proxy theo dạng `ip:port:user:pass` là hệ thống tự tạo VPN.</div>
+            <div class="form-grid">
+              <input id="multiebay-api-base" type="text" placeholder="API base URL" value="https://multiebay.com">
+              <input id="multiebay-api-key" type="password" placeholder="Nhập API key mới nếu muốn lưu hoặc đổi key">
+              <select id="multiebay-allow-http">
+                <option value="1">Default allow HTTP proxy: Yes</option>
+                <option value="0">Default allow HTTP proxy: No</option>
+              </select>
+              <div id="multiebay-settings-state" class="hint" style="align-self:center;">Loading saved router settings...</div>
+            </div>
+            <div class="row-actions">
+              <button class="btn secondary" onclick="saveMultiEbaySettings()">Save API Key On Router</button>
+              <button class="btn ghost tiny" onclick="toggleMultiEbayKeyView()">Show/Hide Saved Key</button>
+              <button class="btn bad tiny" onclick="clearMultiEbayApiKey()">Delete Saved Key</button>
+            </div>
+            <input id="multiebay-saved-key" type="password" placeholder="Saved API key on router" readonly>
+            <div class="form-grid">
+              <input id="multiebay-proxy-quick" type="text" placeholder="Paste proxy: ip:port:user:pass or socks5://user:pass@host:port">
+              <input id="multiebay-profile-name" type="text" placeholder="Profile name (optional)">
+            </div>
+            <div class="row-actions">
+              <button class="btn" onclick="importFromMultiEbayQuick()">Create VPN from Proxy</button>
+            </div>
+            <div class="hint">Nếu bỏ trống tên profile, router sẽ tự tạo tên dựa trên proxy. API key đã lưu trên router sẽ được dùng tự động.</div>
+          </div>
+        </details>
+
         <div id="import-status" class="hint">Choose a file then import.</div>
+        <div id="multiebay-status" class="hint">MultiEbay integration is ready.</div>
       </div>
 
       <div class="card stack">
@@ -511,6 +550,7 @@
     let profileMap = {};
     let cachedDevices = [];
     let cachedPolicies = [];
+    let multiebaySettings = { api_base: 'https://multiebay.com', api_key_saved: false, api_key: '', allow_http_proxy: '1' };
 
     function h(v) {
       return String(v || '').replace(/[&<>"']/g, function (s) {
@@ -586,6 +626,82 @@
         return 'WAN';
       }
       return hit.label.split(' [')[0];
+    }
+
+    function slugifyProfileId(value, fallback) {
+      const raw = String(value || '').toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .replace(/_{2,}/g, '_')
+        .slice(0, 24);
+      return raw || fallback;
+    }
+
+    function loadMultiEbaySettings() {
+      return apiGet('/multiebay_settings').then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Unable to load MultiEbay settings');
+        }
+        multiebaySettings = {
+          api_base: res.api_base || 'https://multiebay.com',
+          api_key_saved: !!res.api_key_saved,
+          api_key: res.api_key || '',
+          allow_http_proxy: res.allow_http_proxy || '1'
+        };
+        document.getElementById('multiebay-api-base').value = multiebaySettings.api_base;
+        document.getElementById('multiebay-allow-http').value = multiebaySettings.allow_http_proxy;
+        const savedKeyInput = document.getElementById('multiebay-saved-key');
+        savedKeyInput.type = 'password';
+        savedKeyInput.value = multiebaySettings.api_key || '';
+        document.getElementById('multiebay-settings-state').textContent = multiebaySettings.api_key_saved
+          ? 'API key is already saved on this router.'
+          : 'No API key saved on this router yet.';
+      }).catch(err => {
+        document.getElementById('multiebay-settings-state').textContent = err.message || 'Unable to load MultiEbay settings.';
+      });
+    }
+
+    function saveMultiEbaySettings() {
+      const apiBase = document.getElementById('multiebay-api-base').value.trim() || 'https://multiebay.com';
+      const apiKey = document.getElementById('multiebay-api-key').value.trim();
+      const allowHttp = document.getElementById('multiebay-allow-http').value || '1';
+
+      apiPost('/multiebay_settings_save', {
+        api_base: apiBase,
+        api_key: apiKey,
+        allow_http_proxy: allowHttp
+      }).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Unable to save MultiEbay settings');
+        }
+        document.getElementById('multiebay-api-key').value = '';
+        document.getElementById('multiebay-settings-state').textContent = 'MultiEbay settings saved on router.';
+        showToast('Saved MultiEbay settings', true);
+        return loadMultiEbaySettings();
+      }).catch(err => {
+        document.getElementById('multiebay-settings-state').textContent = err.message || 'Unable to save MultiEbay settings.';
+        showToast(err.message || 'Unable to save MultiEbay settings', false);
+      });
+    }
+
+    function toggleMultiEbayKeyView() {
+      const keyInput = document.getElementById('multiebay-saved-key');
+      keyInput.type = keyInput.type === 'password' ? 'text' : 'password';
+    }
+
+    function clearMultiEbayApiKey() {
+      apiPost('/multiebay_settings_clear', {}).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'Unable to delete API key');
+        }
+        document.getElementById('multiebay-api-key').value = '';
+        document.getElementById('multiebay-saved-key').value = '';
+        document.getElementById('multiebay-saved-key').type = 'password';
+        showToast('Deleted saved API key', true);
+        return loadMultiEbaySettings();
+      }).catch(err => {
+        showToast(err.message || 'Unable to delete API key', false);
+      });
     }
 
     function applyIfNeeded() {
@@ -781,6 +897,9 @@
         }
       });
 
+      const vpnCount = profileTargets.filter(t => t.value !== 'wan').length;
+      const compactRouteMode = vpnCount >= 4;
+
       const q = (document.getElementById('device-search') ? document.getElementById('device-search').value : '').trim().toLowerCase();
       const f = (document.getElementById('device-filter') ? document.getElementById('device-filter').value : 'all');
 
@@ -822,16 +941,63 @@
           '<td><div class="target-pills"></div></td>';
         tb.appendChild(tr);
 
-        const pills = tr.querySelector('.target-pills');
+        const actionHost = tr.querySelector('.target-pills');
+
+        if (!compactRouteMode) {
+          profileTargets.forEach(t => {
+            const btn = document.createElement('button');
+            btn.className = 'pill' + (t.value === defaultTarget ? ' active' : '');
+            btn.textContent = targetLabel(t.value);
+            btn.onclick = function () {
+              setDeviceTarget(section, dev.mac || '', dev.ip || '', dev.hostname || '', t.value);
+            };
+            actionHost.appendChild(btn);
+          });
+          return;
+        }
+
+        actionHost.className = 'target-compact';
+
+        const picker = document.createElement('select');
+        picker.className = 'route-select';
         profileTargets.forEach(t => {
-          const btn = document.createElement('button');
-          btn.className = 'pill' + (t.value === defaultTarget ? ' active' : '');
-          btn.textContent = targetLabel(t.value);
-          btn.onclick = function () {
-            setDeviceTarget(section, dev.mac || '', dev.ip || '', dev.hostname || '', t.value);
-          };
-          pills.appendChild(btn);
+          const opt = document.createElement('option');
+          opt.value = t.value;
+          opt.textContent = targetLabel(t.value);
+          picker.appendChild(opt);
         });
+        picker.value = profileTargets.some(t => t.value === defaultTarget) ? defaultTarget : 'wan';
+        picker.onchange = function () {
+          setDeviceTarget(section, dev.mac || '', dev.ip || '', dev.hostname || '', picker.value);
+        };
+        actionHost.appendChild(picker);
+
+        const quickActions = document.createElement('div');
+        quickActions.className = 'target-compact-actions';
+
+        const wanBtn = document.createElement('button');
+        wanBtn.className = 'btn tiny ghost';
+        wanBtn.textContent = 'WAN';
+        wanBtn.onclick = function () {
+          if (defaultTarget === 'wan') {
+            return;
+          }
+          setDeviceTarget(section, dev.mac || '', dev.ip || '', dev.hostname || '', 'wan');
+        };
+        quickActions.appendChild(wanBtn);
+
+        const firstVpn = profileTargets.find(t => t.value !== 'wan');
+        if (firstVpn) {
+          const vpnBtn = document.createElement('button');
+          vpnBtn.className = 'btn tiny';
+          vpnBtn.textContent = 'VPN';
+          vpnBtn.onclick = function () {
+            setDeviceTarget(section, dev.mac || '', dev.ip || '', dev.hostname || '', picker.value === 'wan' ? firstVpn.value : picker.value);
+          };
+          quickActions.appendChild(vpnBtn);
+        }
+
+        actionHost.appendChild(quickActions);
       });
     }
 
@@ -898,6 +1064,64 @@
           });
       };
       reader.readAsText(fileInput.files[0]);
+    }
+
+    function importFromMultiEbayQuick() {
+      const status = document.getElementById('multiebay-status');
+      const apiBase = document.getElementById('multiebay-api-base').value.trim() || multiebaySettings.api_base || 'https://multiebay.com';
+      const apiKey = document.getElementById('multiebay-api-key').value.trim();
+      const proxyUrl = document.getElementById('multiebay-proxy-quick').value.trim();
+      const profileNameInput = document.getElementById('multiebay-profile-name').value.trim();
+      let profileId = '';
+      let clientName = '';
+
+      if (!multiebaySettings.api_key_saved && !apiKey) {
+        status.textContent = 'Save MultiEbay API key on router first.';
+        showToast('Save API key first', false);
+        return;
+      }
+
+      if (!proxyUrl) {
+        status.textContent = 'Paste proxy first.';
+        showToast('Missing proxy', false);
+        return;
+      }
+
+      profileId = slugifyProfileId(profileNameInput || proxyUrl, 'vpn_' + Date.now());
+      clientName = clientName || profileId;
+      const profileName = profileNameInput || profileId;
+
+      status.textContent = 'Creating gateway from proxy and importing WireGuard profile into router...';
+
+      apiPost('/multiebay_import', {
+        id: profileId,
+        api_base: apiBase,
+        api_key: apiKey,
+        proxy_url: proxyUrl,
+        gateway_name: '',
+        client_name: clientName,
+        profile_name: profileName,
+        allow_http_proxy: document.getElementById('multiebay-allow-http').value
+      }).then(res => {
+        if (res.ok === false) {
+          throw new Error(res.error || 'MultiEbay import failed');
+        }
+
+        document.getElementById('profile-id').value = profileId;
+        document.getElementById('profile-name').value = profileName;
+        document.getElementById('multiebay-proxy-quick').value = '';
+        document.getElementById('multiebay-api-key').value = '';
+        status.textContent = 'Imported profile ' + profileId + (res.gateway_name ? (' from gateway ' + res.gateway_name) : '') + '.';
+
+        return applyIfNeeded().then(() => ({ profileId: profileId, gatewayName: res.gateway_name || '' }));
+      }).then(info => {
+        return refreshAll().then(() => {
+          showToast('MultiEbay VPN imported: ' + info.profileId, true);
+        });
+      }).catch(err => {
+        status.textContent = err.message || 'MultiEbay import failed.';
+        showToast(err.message || 'MultiEbay import failed', false);
+      });
     }
 
     function savePolicy() {
@@ -1005,6 +1229,7 @@
         .then(loadProfiles)
         .then(loadPolicies)
         .then(loadDevices)
+        .then(loadMultiEbaySettings)
         .catch(() => {
           showToast('Failed to refresh dashboard', false);
         });
