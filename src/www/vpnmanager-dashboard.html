@@ -1,1245 +1,882 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>VPN Manager</title>
-  <style>
-    :root {
-      --bg: #f4f8ff;
-      --bg-2: #eaf3ff;
-      --panel: #ffffff;
-      --line: #d7e3f4;
-      --text: #16304f;
-      --muted: #5f7593;
-      --primary: #0a84ff;
-      --primary-2: #00b8d9;
-      --ok: #0f9d58;
-      --warn: #d98600;
-      --bad: #d12f48;
-      --shadow: 0 16px 38px rgba(28, 61, 102, 0.12);
-      --radius: 16px;
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPN Manager</title>
+    <!-- Use Tailwind CSS similarly to the requested template -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .sidebar-scroll::-webkit-scrollbar { width: 4px; }
+        .sidebar-scroll::-webkit-scrollbar-thumb { background-color: #374151; border-radius: 4px; }
+        .hidden { display: none !important; }
+        
+        /* Base input styles matching Tailwind for existing JS fields */
+        .form-control {
+            width: 100%; padding: 0.5rem 0.75rem; font-size: 0.875rem; 
+            border: 1px solid #e5e7eb; border-radius: 0.5rem; background-color: #f9fafb;
+            color: #4b5563; outline: none; transition: all 0.2s;
+        }
+        .form-control:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1); }
+        .btn-primary {
+            background-color: #3b82f6; color: white; font-weight: 500; font-size: 0.875rem;
+            padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s;
+            border: none; cursor: pointer;
+        }
+        .btn-primary:hover { background-color: #2563eb; }
+        .btn-danger {
+            background-color: #ef4444; color: white; font-weight: 500; font-size: 0.875rem;
+            padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s;
+            border: none; cursor: pointer;
+        }
+        .btn-danger:hover { background-color: #dc2626; }
+        .btn-secondary {
+            background-color: #e5e7eb; color: #4b5563; font-weight: 500; font-size: 0.875rem;
+            padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s;
+            border: none; cursor: pointer;
+        }
+        .btn-secondary:hover { background-color: #d1d5db; }
+        .btn-tiny { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
 
-    * { box-sizing: border-box; }
+        .toast-msg {
+            position: fixed; right: 1rem; bottom: 1rem; min-width: 200px;
+            padding: 0.75rem 1rem; border-radius: 0.5rem; color: white; font-weight: 600;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            opacity: 0; transform: translateY(10px); transition: all 0.3s; z-index: 50; pointer-events: none;
+        }
+        .toast-msg.show { opacity: 1; transform: translateY(0); }
+        .toast-msg.ok { background-color: #10b981; }
+        .toast-msg.error { background-color: #ef4444; }
 
-    body {
-      margin: 0;
-      font-family: "Segoe UI Variable", "Trebuchet MS", "Tahoma", sans-serif;
-      color: var(--text);
-      background:
-        radial-gradient(circle at 90% 8%, #d8edff 0, #d8edff 18%, transparent 45%),
-        radial-gradient(circle at 8% 90%, #d9fff2 0, #d9fff2 15%, transparent 42%),
-        linear-gradient(160deg, var(--bg), var(--bg-2));
-      min-height: 100vh;
-      animation: pageIn .35s ease-out;
-    }
-
-    @keyframes pageIn {
-      from { opacity: 0; transform: translateY(5px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .shell {
-      max-width: 1240px;
-      margin: 0 auto;
-      padding: 24px 16px 40px;
-    }
-
-    .hero {
-      display: grid;
-      grid-template-columns: 1.3fr .7fr;
-      gap: 14px;
-      margin-bottom: 14px;
-    }
-
-    .hero-main {
-      background: linear-gradient(135deg, #0d7ef0, #18accf 72%);
-      color: #fff;
-      border-radius: 24px;
-      padding: 22px;
-      box-shadow: var(--shadow);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .hero-main:before {
-      content: "";
-      position: absolute;
-      width: 220px;
-      height: 220px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, .18);
-      right: -40px;
-      top: -70px;
-    }
-
-    .hero h1 {
-      margin: 0 0 6px;
-      font-size: 30px;
-      letter-spacing: .2px;
-      position: relative;
-      z-index: 2;
-    }
-
-    .hero p {
-      margin: 0;
-      color: rgba(255, 255, 255, .92);
-      position: relative;
-      z-index: 2;
-    }
-
-    .hero-actions {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      flex-wrap: wrap;
-      margin-top: 16px;
-      position: relative;
-      z-index: 2;
-    }
-
-    .hero-side {
-      background: var(--panel);
-      border-radius: 24px;
-      padding: 16px;
-      border: 1px solid var(--line);
-      box-shadow: var(--shadow);
-      display: grid;
-      gap: 10px;
-      align-content: start;
-    }
-
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 12px;
-      font-weight: 700;
-      background: #ebf5ff;
-      color: #1e4f7f;
-      width: max-content;
-    }
-
-    .chip .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: currentColor;
-    }
-
-    .btn {
-      border: 0;
-      border-radius: 12px;
-      padding: 10px 14px;
-      font-weight: 700;
-      color: #fff;
-      background: linear-gradient(135deg, var(--primary), #009ff6);
-      cursor: pointer;
-      transition: .2s transform, .2s filter;
-    }
-
-    .btn:hover { transform: translateY(-1px); filter: brightness(1.03); }
-    .btn:active { transform: translateY(0); }
-    .btn.secondary { background: linear-gradient(135deg, #5f7593, #7d90ab); }
-    .btn.ghost { background: #eef5ff; color: #215384; }
-    .btn.warn { background: linear-gradient(135deg, #eb7e00, #ff9f1a); }
-    .btn.bad { background: linear-gradient(135deg, #ca2743, #f24b67); }
-    .btn.tiny { padding: 7px 10px; border-radius: 10px; font-size: 12px; }
-
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-      margin-bottom: 14px;
-    }
-
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      padding: 14px;
-      animation: cardIn .3s ease-out;
-    }
-
-    @keyframes cardIn {
-      from { opacity: 0; transform: translateY(4px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
-    .value { margin-top: 6px; font-size: 30px; font-weight: 800; }
-    .value.small { font-size: 16px; font-weight: 700; line-height: 1.4; }
-
-    .layout {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-      margin-bottom: 12px;
-    }
-
-    .panel-title {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-      gap: 10px;
-    }
-
-    h3 {
-      margin: 0;
-      font-size: 16px;
-      letter-spacing: .2px;
-    }
-
-    .stack { display: grid; gap: 10px; }
-    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
-
-    input[type="text"], input[type="password"], input[type="file"], textarea, select {
-      width: 100%;
-      border-radius: 12px;
-      border: 1px solid #ccdcf0;
-      background: #f8fbff;
-      color: var(--text);
-      padding: 10px;
-      font: inherit;
-      outline: none;
-      transition: border-color .2s, box-shadow .2s;
-    }
-
-    input:focus, textarea:focus, select:focus {
-      border-color: #6db7ff;
-      box-shadow: 0 0 0 3px rgba(10, 132, 255, .14);
-    }
-
-    textarea { min-height: 140px; resize: vertical; }
-    .hint { font-size: 12px; color: var(--muted); }
-
-    .table-wrap { overflow-x: auto; border: 1px solid #dbe8f7; border-radius: 12px; }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 720px;
-      background: #fff;
-    }
-
-    th, td {
-      border-bottom: 1px solid #e6eef9;
-      text-align: left;
-      padding: 10px 9px;
-      vertical-align: middle;
-      font-size: 13px;
-    }
-
-    th {
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: .4px;
-      color: #5f7593;
-      background: #f7fbff;
-    }
-
-    .badge {
-      display: inline-block;
-      border-radius: 999px;
-      padding: 4px 9px;
-      font-size: 11px;
-      font-weight: 700;
-      border: 1px solid transparent;
-    }
-
-    .badge.healthy { color: #0a7a44; background: #e8faef; border-color: #a7e6c3; }
-    .badge.degraded { color: #9b5f00; background: #fff4df; border-color: #ffd79c; }
-    .badge.down { color: #9b1831; background: #ffe8ee; border-color: #ffc3cf; }
-    .badge.wan { color: #1f4f7d; background: #e8f3ff; border-color: #b8d8ff; }
-    .badge.vpn { color: #08606b; background: #e5fbff; border-color: #afecf6; }
-    .badge.connected { color: #0a7a44; background: #e8faef; border-color: #a7e6c3; }
-    .badge.offline { color: #8b5e00; background: #fff4df; border-color: #ffd79c; }
-
-    .tools-row {
-      display: grid;
-      grid-template-columns: 1fr 180px;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-
-    .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-    .target-pills { display: flex; flex-wrap: wrap; gap: 6px; }
-    .target-compact { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
-    .target-compact-actions { display: flex; gap: 6px; }
-    .pill {
-      border: 1px solid #c8dbf3;
-      background: #f8fbff;
-      color: #244f7a;
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .pill.active {
-      background: linear-gradient(135deg, #0a84ff, #00a8ea);
-      border-color: #0a84ff;
-      color: #fff;
-    }
-    .route-select {
-      min-width: 170px;
-      padding: 7px 10px;
-      font-size: 12px;
-      border-radius: 10px;
-    }
-    details.advanced {
-      border: 1px solid #dbe8f7;
-      border-radius: 12px;
-      background: #f8fbff;
-      padding: 10px;
-    }
-    details.advanced > summary {
-      cursor: pointer;
-      font-weight: 700;
-      color: #215384;
-      outline: none;
-    }
-    .compact-note {
-      padding: 10px;
-      border-radius: 12px;
-      background: #edf6ff;
-      color: #24507d;
-      font-size: 13px;
-      border: 1px solid #d0e5ff;
-    }
-
-    .footer-actions {
-      margin-top: 10px;
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-
-    .toast {
-      position: fixed;
-      right: 16px;
-      bottom: 16px;
-      min-width: 220px;
-      max-width: 360px;
-      padding: 12px 14px;
-      border-radius: 12px;
-      color: #fff;
-      font-weight: 700;
-      box-shadow: 0 12px 28px rgba(0, 0, 0, .2);
-      opacity: 0;
-      pointer-events: none;
-      transform: translateY(8px);
-      transition: .2s ease;
-      z-index: 50;
-    }
-
-    .toast.show { opacity: 1; transform: translateY(0); }
-    .toast.ok { background: linear-gradient(135deg, #198754, #0fa36a); }
-    .toast.error { background: linear-gradient(135deg, #b8203d, #d7445d); }
-
-    @media (max-width: 980px) {
-      .hero { grid-template-columns: 1fr; }
-      .stats, .layout, .form-grid { grid-template-columns: 1fr; }
-      .value { font-size: 26px; }
-      .tools-row { grid-template-columns: 1fr; }
-    }
-  </style>
+        /* Legacy badges */
+        .badge { display: inline-block; border-radius: 9999px; padding: 0.15rem 0.6rem; font-size: 0.7rem; font-weight: 700; border: 1px solid transparent; }
+        .badge.healthy { color: #065f46; background: #d1fae5; border-color: #6ee7b7; }
+        .badge.degraded { color: #92400e; background: #fef3c7; border-color: #fcd34d; }
+        .badge.down { color: #991b1b; background: #ffe4e6; border-color: #fda4af; }
+        .badge.wan { color: #1e3a8a; background: #dbeafe; border-color: #93c5fd; }
+        .badge.vpn { color: #155e75; background: #cffafe; border-color: #67e8f9; }
+        .badge.connected { color: #065f46; background: #d1fae5; border-color: #6ee7b7; }
+        .badge.offline { color: #92400e; background: #fef3c7; border-color: #fcd34d; }
+    </style>
 </head>
-<body>
-  <div class="shell">
-    <div class="hero">
-      <div class="hero-main">
-        <h1>VPN Manager</h1>
-        <p>Control WireGuard profiles, map devices, and enforce per-device VPN routing.</p>
-        <div class="hero-actions">
-          <button class="btn" onclick="refreshAll()">Refresh</button>
-          <button class="btn secondary" onclick="rollbackCfg()">Rollback Last</button>
-        </div>
-      </div>
-      <div class="hero-side">
-        <span class="chip"><span class="dot"></span> Live Control Panel</span>
-        <div>
-          <div class="label">Last Sync</div>
-          <div id="last-sync" class="value small">Ready</div>
-        </div>
-        <div class="hint">Policies can now remove VPN assignment instantly by switching target to WAN.</div>
-      </div>
-    </div>
+<body class="bg-[#f3f4f6] flex h-screen overflow-hidden text-gray-800">
 
-    <div class="stats">
-      <div class="card"><div class="label">VPN Healthy</div><div id="vpn-up" class="value">0</div></div>
-      <div class="card"><div class="label">VPN Down</div><div id="vpn-down" class="value">0</div></div>
-      <div class="card"><div class="label">Policies / Profiles</div><div id="policy-count" class="value">0</div><div id="profile-count" class="hint">0 profiles</div></div>
-    </div>
-
-    <div class="layout">
-      <div class="card stack">
-        <div class="panel-title">
-          <h3>Profile Manager</h3>
-        </div>
-        <div class="form-grid">
-          <input id="profile-id" type="text" placeholder="Profile ID, e.g. vpn_us_1">
-          <input id="profile-name" type="text" placeholder="Display name">
-          <input id="profile-endpoint-host" type="text" placeholder="Endpoint host">
-          <input id="profile-endpoint-port" type="text" placeholder="Endpoint port">
-          <input id="profile-address" type="text" placeholder="Address, e.g. 10.0.0.2/32">
-          <input id="profile-dns" type="text" placeholder="DNS, e.g. 10.0.0.1">
-          <input id="profile-allowed-ips" type="text" placeholder="Allowed IPs, e.g. 0.0.0.0/0">
-          <input id="profile-keepalive" type="text" placeholder="Keepalive, e.g. 25">
-          <input id="profile-mtu" type="text" placeholder="MTU (optional)">
-          <select id="profile-enabled">
-            <option value="1">Enabled</option>
-            <option value="0">Disabled</option>
-          </select>
-          <input id="profile-public-key" type="text" placeholder="Peer public key">
-          <input id="profile-private-key" type="text" placeholder="Private key (leave blank to keep)">
-        </div>
-        <div class="row-actions">
-          <button class="btn" onclick="saveProfile()">Save Profile</button>
-          <button class="btn ghost tiny" onclick="clearProfileForm()">Clear</button>
-        </div>
-
-        <details class="advanced">
-          <summary>Import from .conf</summary>
-          <div class="stack" style="margin-top:10px;">
-            <input id="import-file" type="file" accept=".conf,.txt">
-            <input id="import-id" type="text" placeholder="Profile ID, e.g. vpn_us_1">
-            <button class="btn" onclick="importConf()">Import Profile</button>
-          </div>
-        </details>
-
-        <details class="advanced">
-          <summary>MultiEbay Quick Import</summary>
-          <div class="stack" style="margin-top:10px;">
-            <div class="compact-note">Thiết lập API key một lần trên router. Sau đó chỉ cần paste proxy theo dạng `ip:port:user:pass` là hệ thống tự tạo VPN.</div>
-            <div class="form-grid">
-              <input id="multiebay-api-base" type="text" placeholder="API base URL" value="https://multiebay.com">
-              <input id="multiebay-api-key" type="password" placeholder="Nhập API key mới nếu muốn lưu hoặc đổi key">
-              <select id="multiebay-allow-http">
-                <option value="1">Default allow HTTP proxy: Yes</option>
-                <option value="0">Default allow HTTP proxy: No</option>
-              </select>
-              <div id="multiebay-settings-state" class="hint" style="align-self:center;">Loading saved router settings...</div>
+    <aside class="w-[260px] bg-[#161e31] h-full flex flex-col flex-shrink-0 shadow-xl z-10 transition-all duration-300" id="sidebar">
+        <div class="h-20 flex items-center px-6 border-b border-gray-700/50">
+            <div class="flex items-center space-x-3 text-white w-full">
+                <i class="fas fa-network-wired text-2xl text-gray-300"></i>
+                <div class="flex-1">
+                    <h1 class="font-bold text-lg tracking-tight uppercase">multiebay.com</h1>
+                    <p class="text-[10px] text-gray-400 font-medium">VPN Manager</p>
+                </div>
             </div>
-            <div class="row-actions">
-              <button class="btn secondary" onclick="saveMultiEbaySettings()">Save API Key On Router</button>
-              <button class="btn ghost tiny" onclick="toggleMultiEbayKeyView()">Show/Hide Saved Key</button>
-              <button class="btn bad tiny" onclick="clearMultiEbayApiKey()">Delete Saved Key</button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto sidebar-scroll py-4 flex flex-col gap-1 px-3">
+            
+            <div class="px-3 py-2 mt-2">
+                <p class="text-[11px] font-bold text-gray-400 tracking-widest uppercase">Management</p>
             </div>
-            <input id="multiebay-saved-key" type="password" placeholder="Saved API key on router" readonly>
-            <div class="form-grid">
-              <input id="multiebay-proxy-quick" type="text" placeholder="Paste proxy: ip:port:user:pass or socks5://user:pass@host:port">
-              <input id="multiebay-profile-name" type="text" placeholder="Profile name (optional)">
+            
+            <a href="#" onclick="switchTab('dashboard', this)" class="menu-tab flex items-center space-x-3 px-3 py-2.5 bg-[#f4c130] text-gray-900 rounded-lg shadow-sm font-semibold text-sm transition-colors">
+                <i class="fas fa-tachometer-alt w-5 text-center text-lg"></i>
+                <span>Dashboard</span>
+            </a>
+            
+            <a href="#" onclick="switchTab('devices', this)" class="menu-tab flex items-center space-x-3 px-3 py-2.5 text-gray-300 hover:bg-white/5 rounded-lg font-medium text-sm transition-colors">
+                <i class="fas fa-laptop w-5 text-center text-lg"></i>
+                <span>Devices Routing</span>
+            </a>
+
+            <a href="#" onclick="switchTab('profiles', this)" class="menu-tab flex items-center space-x-3 px-3 py-2.5 text-gray-300 hover:bg-white/5 rounded-lg font-medium text-sm transition-colors">
+                <i class="fas fa-shield-alt w-5 text-center text-lg"></i>
+                <span>VPN Profiles</span>
+            </a>
+
+            <a href="#" onclick="switchTab('multiebay', this)" class="menu-tab flex items-center space-x-3 px-3 py-2.5 text-gray-300 hover:bg-white/5 rounded-lg font-medium text-sm transition-colors">
+                <i class="fas fa-bolt w-5 text-center text-lg"></i>
+                <span>MultiEbay Import</span>
+            </a>
+
+            <a href="#" onclick="switchTab('wifi', this)" class="menu-tab flex items-center space-x-3 px-3 py-2.5 text-gray-300 hover:bg-white/5 rounded-lg font-medium text-sm transition-colors">
+                <i class="fas fa-wifi w-5 text-center text-lg"></i>
+                <span>WiFi Manager</span>
+            </a>
+
+            <a href="#" onclick="switchTab('policies', this)" class="menu-tab flex items-center space-x-3 px-3 py-2.5 text-gray-300 hover:bg-white/5 rounded-lg font-medium text-sm transition-colors">
+                <i class="fas fa-route w-5 text-center text-lg"></i>
+                <span>Policies & Advanced</span>
+            </a>
+
+            <div class="mt-auto pt-4 pb-2">
+                <div class="px-3 py-2">
+                    <p class="text-[11px] font-bold text-gray-400 tracking-widest uppercase">System</p>
+                </div>
+                <button onclick="refreshAll()" class="w-full flex items-center space-x-3 px-3 py-2 text-gray-400 hover:text-gray-200 transition-colors">
+                    <i class="fas fa-sync-alt w-5 text-center"></i>
+                    <span class="text-sm">Refresh All</span>
+                </button>
+                <div class="flex items-center space-x-3 px-3 py-2 mt-2 text-gray-400">
+                    <i class="fas fa-clock w-5 text-center"></i>
+                    <span class="text-xs" id="last-sync">Ready</span>
+                </div>
             </div>
-            <div class="row-actions">
-              <button class="btn" onclick="importFromMultiEbayQuick()">Create VPN from Proxy</button>
+        </div>
+    </aside>
+
+    <main class="flex-1 flex flex-col h-full bg-[#f8f9fa] overflow-y-auto">
+        <div class="p-8 w-full max-w-[1400px] mx-auto">
+            
+            <!-- Dashboard Tab -->
+            <div id="tab-dashboard" class="tab-content">
+                <h2 class="text-2xl font-bold text-gray-700 mb-6">Dashboard Overview</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100 flex items-center">
+                        <div class="rounded-full bg-green-100 p-4 mr-4"><i class="fas fa-check-circle text-green-600 text-xl"></i></div>
+                        <div>
+                            <p class="text-sm text-gray-500 font-medium uppercase tracking-wide">VPN Healthy</p>
+                            <p class="text-3xl font-bold text-gray-800 mt-1" id="vpn-up">0</p>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100 flex items-center">
+                        <div class="rounded-full bg-red-100 p-4 mr-4"><i class="fas fa-exclamation-circle text-red-600 text-xl"></i></div>
+                        <div>
+                            <p class="text-sm text-gray-500 font-medium uppercase tracking-wide">VPN Down</p>
+                            <p class="text-3xl font-bold text-gray-800 mt-1" id="vpn-down">0</p>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100 flex items-center">
+                        <div class="rounded-full bg-blue-100 p-4 mr-4"><i class="fas fa-network-wired text-blue-600 text-xl"></i></div>
+                        <div>
+                            <p class="text-sm text-gray-500 font-medium uppercase tracking-wide">Active Profiles</p>
+                            <p class="text-3xl font-bold text-gray-800 mt-1"><span id="profile-count-dash">0</span></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold text-gray-700">Audit Log</h3>
+                        <button class="text-blue-500 hover:text-blue-700 text-sm font-medium" onclick="loadAudit()">Refresh Log</button>
+                    </div>
+                    <textarea id="audit-log" readonly class="w-full h-48 form-control bg-gray-50 font-mono text-xs" style="resize: none;"></textarea>
+                </div>
             </div>
-            <div class="hint">Nếu bỏ trống tên profile, router sẽ tự tạo tên dựa trên proxy. API key đã lưu trên router sẽ được dùng tự động.</div>
-          </div>
-        </details>
 
-        <div id="import-status" class="hint">Choose a file then import.</div>
-        <div id="multiebay-status" class="hint">MultiEbay integration is ready.</div>
-      </div>
+            <!-- Devices Tab -->
+            <div id="tab-devices" class="tab-content hidden">
+                <div class="flex justify-between items-end mb-6">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-700">Devices Routing</h2>
+                        <p class="text-sm text-gray-500 mt-1">Assign WAN or specific VPN profiles to devices instantly.</p>
+                    </div>
+                    <div class="flex space-x-3">
+                        <input id="device-search" type="text" placeholder="Search MAC/IP/Host..." class="form-control w-48" oninput="renderDevices()">
+                        <select id="device-filter" class="form-control w-32" onchange="renderDevices()">
+                            <option value="all">All</option>
+                            <option value="connected">Connected</option>
+                            <option value="offline">Offline</option>
+                            <option value="vpn">VPN Routed</option>
+                            <option value="wan">WAN Routed</option>
+                        </select>
+                    </div>
+                </div>
 
-      <div class="card stack">
-        <div class="panel-title">
-          <h3>Quick Device Routing</h3>
-        </div>
-        <div class="compact-note">Dùng bảng Devices bên dưới để gán WAN/VPN chỉ với 1 lần bấm. Hệ thống sẽ tự apply ngay sau khi đổi.</div>
-        <details class="advanced">
-          <summary>Advanced: Create / Edit Policy</summary>
-          <div class="stack" style="margin-top:10px;">
-            <div class="form-grid">
-              <input id="policy-section" type="text" placeholder="Policy section">
-              <input id="policy-hostname" type="text" placeholder="Hostname (optional)">
-              <input id="policy-mac" type="text" placeholder="MAC address">
-              <input id="policy-ip" type="text" placeholder="IP address (optional)">
-              <select id="policy-target"></select>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm whitespace-nowrap">
+                            <thead class="uppercase tracking-wider border-b border-gray-200 bg-gray-50 text-gray-500 font-semibold text-xs">
+                                <tr>
+                                    <th class="px-6 py-4">Hostname</th>
+                                    <th class="px-6 py-4">IP Address</th>
+                                    <th class="px-6 py-4">MAC Address</th>
+                                    <th class="px-6 py-4">Status</th>
+                                    <th class="px-6 py-4">Current Route</th>
+                                    <th class="px-6 py-4">1-Tap Override</th>
+                                </tr>
+                            </thead>
+                            <tbody id="devices-table-body" class="divide-y divide-gray-100">
+                                <!-- Devices populated via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
-            <div class="row-actions">
-              <button class="btn" onclick="savePolicy()">Save Policy</button>
-              <button class="btn ghost tiny" onclick="clearPolicyForm()">Clear</button>
+
+            <!-- Profiles Tab -->
+            <div id="tab-profiles" class="tab-content hidden">
+                <div class="flex justify-between items-end mb-6">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-700">VPN Profiles</h2>
+                        <p class="text-sm text-gray-500 mt-1">Manage existing WireGuard connections.</p>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-8">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm whitespace-nowrap">
+                            <thead class="uppercase tracking-wider border-b border-gray-200 bg-gray-50 text-gray-500 font-semibold text-xs">
+                                <tr>
+                                    <th class="px-6 py-4">Profile Name</th>
+                                    <th class="px-6 py-4">ID</th>
+                                    <th class="px-6 py-4">Endpoint</th>
+                                    <th class="px-6 py-4">Status</th>
+                                    <th class="px-6 py-4">Handshake</th>
+                                    <th class="px-6 py-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="profiles-table-body" class="divide-y divide-gray-100">
+                                <!-- Profiles populated via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <h3 class="text-lg font-bold text-gray-700 mb-4">Edit / Setup Profile</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Profile ID</label><input id="profile-id" type="text" placeholder="vpn_us_1" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Display Name</label><input id="profile-name" type="text" placeholder="US VPN" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Status</label>
+                            <select id="profile-enabled" class="form-control"><option value="1">Enabled</option><option value="0">Disabled</option></select>
+                        </div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Endpoint Host</label><input id="profile-endpoint-host" type="text" placeholder="eg. 1.2.3.4" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Endpoint Port</label><input id="profile-endpoint-port" type="text" placeholder="51820" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Address</label><input id="profile-address" type="text" placeholder="10.0.0.2/32" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Allowed IPs</label><input id="profile-allowed-ips" type="text" placeholder="0.0.0.0/0" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">DNS</label><input id="profile-dns" type="text" placeholder="1.1.1.1" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Keepalive</label><input id="profile-keepalive" type="text" placeholder="25" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">MTU</label><input id="profile-mtu" type="text" placeholder="1420" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Public Key</label><input id="profile-public-key" type="text" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Private Key</label><input id="profile-private-key" type="text" placeholder="Leave blank to keep current" class="form-control"></div>
+                    </div>
+                    <div class="flex space-x-3">
+                        <button class="btn-primary" onclick="saveProfile()">Save Profile</button>
+                        <button class="btn-secondary" onclick="clearProfileForm()">Clear</button>
+                    </div>
+                </div>
             </div>
-          </div>
-        </details>
-        <div class="hint">Mặc định: thao tác 1 chạm trong Devices. Advanced chỉ dùng khi cần tinh chỉnh thủ công.</div>
-      </div>
-    </div>
 
-    <div class="card" style="margin-bottom: 12px;">
-      <div class="panel-title">
-        <h3>Profiles</h3>
-      </div>
-      <div class="table-wrap">
-        <table id="profiles-table">
-          <thead>
-            <tr><th>Name</th><th>ID</th><th>Endpoint</th><th>Status</th><th>Handshake Age</th><th>Actions</th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
+            <!-- MultiEbay / Import Tab -->
+            <div id="tab-multiebay" class="tab-content hidden">
+                <h2 class="text-2xl font-bold text-gray-700 mb-6">Create VPN from Proxy</h2>
 
-    <div class="layout">
-      <div class="card">
-        <div class="panel-title">
-          <h3>Devices</h3>
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-6">
+                    <h3 class="text-lg font-bold text-gray-700 mb-1">MultiEbay Quick Import</h3>
+                    <p class="text-sm text-gray-500 mb-5">Convert a SOCKS5/HTTP proxy string instantly into a full OpenWrt WireGuard profile.</p>
+
+                    <div class="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-6">
+                        <p class="text-sm text-blue-800 font-medium mb-3">1. Router Core Settings (Once)</p>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+                            <div><label class="block text-xs font-semibold text-blue-800 mb-1 opacity-80">API Base</label><input id="multiebay-api-base" type="text" class="form-control"></div>
+                            <div><label class="block text-xs font-semibold text-blue-800 mb-1 opacity-80">Allow HTTP Proxy Default</label>
+                                <select id="multiebay-allow-http" class="form-control">
+                                    <option value="1">Yes</option>
+                                    <option value="0">No</option>
+                                </select>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="block text-xs font-semibold text-blue-800 mb-1 opacity-80">Router Saved API Key</label>
+                                <div class="flex space-x-2">
+                                    <input id="multiebay-saved-key" type="password" class="form-control" readonly placeholder="No API key saved">
+                                    <button class="btn-secondary whitespace-nowrap" onclick="toggleMultiEbayKeyView()"><i class="fas fa-eye"></i></button>
+                                    <button class="btn-danger whitespace-nowrap" onclick="clearMultiEbayApiKey()"><i class="fas fa-trash"></i></button>
+                                </div>
+                                <div id="multiebay-settings-state" class="text-xs mt-1 text-blue-600">Loading settings...</div>
+                            </div>
+                        </div>
+                        <div class="pt-2 border-t border-blue-100 mt-2">
+                            <label class="block text-xs font-semibold text-blue-800 mb-1 opacity-80">Update API Key</label>
+                            <div class="flex space-x-2">
+                                <input id="multiebay-api-key" type="password" class="form-control" placeholder="Enter new API key to save">
+                                <button class="btn-primary" onclick="saveMultiEbaySettings()">Save Details</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="p-4 border border-gray-200 rounded-lg">
+                        <p class="text-sm text-gray-700 font-bold mb-3">2. Paste & Create VPN</p>
+                        <div class="grid grid-cols-1 gap-4 mb-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">Proxy String</label>
+                                <input id="multiebay-proxy-quick" type="text" placeholder="Format: ip:port:user:pass or socks5://..." class="form-control font-mono text-sm border-blue-300">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">Profile Name (Optional)</label>
+                                <input id="multiebay-profile-name" type="text" placeholder="Will be auto-generated if left blank" class="form-control">
+                            </div>
+                        </div>
+                        <button class="btn-primary w-full md:w-auto" onclick="importFromMultiEbayQuick()"><i class="fas fa-bolt mr-2"></i>Generate & Apply</button>
+                        <div id="multiebay-status" class="mt-3 text-sm font-medium text-gray-500">Waiting for input...</div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <h3 class="text-lg font-bold text-gray-700 mb-4">Manual .conf Import</h3>
+                    <div class="flex flex-col md:flex-row space-y-3 md:space-y-0 md:space-x-3 items-end">
+                        <div class="w-full md:w-1/2">
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">WireGuard Conf File</label>
+                            <input id="import-file" type="file" accept=".conf,.txt" class="form-control p-1.5">
+                        </div>
+                        <div class="w-full md:w-1/3">
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Import ID</label>
+                            <input id="import-id" type="text" placeholder="vpn_xyz" class="form-control">
+                        </div>
+                        <button class="btn-secondary" onclick="importConf()">Import</button>
+                    </div>
+                    <div id="import-status" class="mt-2 text-xs text-gray-500"></div>
+                </div>
+            </div>
+
+            <!-- WiFi Tab -->
+            <div id="tab-wifi" class="tab-content hidden">
+                <h2 class="text-2xl font-bold text-gray-700 mb-6">WiFi Network Manager</h2>
+                
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">SSID (Network Name)</label>
+                            <input id="wifi-ssid" type="text" class="form-control">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Password / Key</label>
+                            <input id="wifi-key" type="text" class="form-control">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Security</label>
+                            <select id="wifi-encryption" class="form-control">
+                                <option value="sae-mixed">WPA2/WPA3 Mixed (Recommended)</option>
+                                <option value="psk2">WPA2-PSK</option>
+                                <option value="sae">WPA3-SAE</option>
+                                <option value="none">Open (No Password)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Radio Status</label>
+                            <select id="wifi-enabled" class="form-control">
+                                <option value="1">Enabled</option>
+                                <option value="0">Disabled</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Channel</label>
+                            <input id="wifi-channel" type="text" placeholder="auto" class="form-control">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Country</label>
+                            <input id="wifi-country" type="text" class="form-control" readonly disabled>
+                        </div>
+                    </div>
+                    
+                    <div class="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <div id="wifi-status" class="text-sm font-medium tracking-wide text-gray-600">Checking WiFi state...</div>
+                        <div class="flex space-x-3">
+                            <button class="btn-secondary" onclick="loadWifiSettings(false)">Reload</button>
+                            <button class="btn-primary" onclick="saveWifiSettings()"><i class="fas fa-wifi mr-2"></i>Apply Changes</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Policies Tab -->
+            <div id="tab-policies" class="tab-content hidden">
+                <h2 class="text-2xl font-bold text-gray-700 mb-6">Advanced Routing Policies</h2>
+                
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-6">
+                    <h3 class="text-lg font-bold text-gray-700 mb-4">Create / Edit Raw Policy</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Rule ID</label>
+                            <input id="policy-section" type="text" class="form-control" placeholder="policy_1">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">MAC Address</label>
+                            <input id="policy-mac" type="text" class="form-control">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">IP Address</label>
+                            <input id="policy-ip" type="text" class="form-control" placeholder="(optional)">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Alias/Hostname</label>
+                            <input id="policy-hostname" type="text" class="form-control" placeholder="(optional)">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Target Route</label>
+                            <select id="policy-target" class="form-control" data-target-for="policy"></select>
+                        </div>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button class="btn-primary" onclick="savePolicy()">Save Rule</button>
+                        <button class="btn-secondary" onclick="clearPolicyForm()">Reset</button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm whitespace-nowrap">
+                            <thead class="uppercase tracking-wider border-b border-gray-200 bg-gray-50 text-gray-500 font-semibold text-xs">
+                                <tr>
+                                    <th class="px-6 py-4">Rule Section</th>
+                                    <th class="px-6 py-4">Hostname</th>
+                                    <th class="px-6 py-4">MAC</th>
+                                    <th class="px-6 py-4">IP</th>
+                                    <th class="px-6 py-4">Target Route</th>
+                                    <th class="px-6 py-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="policies-table-body" class="divide-y divide-gray-100">
+                                <!-- Policies populated via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
         </div>
-        <div class="tools-row">
-          <input id="device-search" type="text" placeholder="Search hostname / IP / MAC" oninput="renderDevices()">
-          <select id="device-filter" onchange="renderDevices()">
-            <option value="all">All</option>
-            <option value="connected">Connected</option>
-            <option value="offline">Offline</option>
-            <option value="vpn">Target VPN</option>
-            <option value="wan">Target WAN</option>
-          </select>
-        </div>
-        <div class="table-wrap">
-          <table id="devices-table">
-            <thead>
-              <tr><th>Hostname</th><th>IP</th><th>MAC</th><th>Connected</th><th>Current</th><th>1-Tap Route</th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
+    </main>
 
-      <div class="card">
-        <div class="panel-title">
-          <h3>Policies</h3>
-        </div>
-        <div class="table-wrap">
-          <table id="policies-table">
-            <thead>
-              <tr><th>Section</th><th>Hostname</th><th>MAC</th><th>IP</th><th>Target</th><th>Actions</th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    <div id="toast" class="toast-msg"></div>
 
-    <div class="card" style="margin-top: 12px;">
-      <div class="panel-title">
-        <h3>Audit Log</h3>
-      </div>
-      <textarea id="audit-log" readonly></textarea>
-      <div class="footer-actions">
-        <div class="hint">Auto-refresh every 8 seconds for status, profiles, devices, and policies.</div>
-        <button class="btn tiny ghost" onclick="loadAudit()">Refresh Log</button>
-      </div>
-    </div>
-  </div>
+    <script>
+        const basePath = window.location.pathname.replace(/\/$/, '');
+        let profileTargets = [{ value: 'wan', label: 'WAN' }];
+        let policyMap = {};
+        let profileMap = {};
+        let cachedDevices = [];
+        let cachedPolicies = [];
+        let multiebaySettings = { api_base: 'https://multiebay.com', api_key_saved: false, api_key: '', allow_http_proxy: '1' };
 
-  <div id="toast" class="toast"></div>
-
-  <script>
-    const basePath = window.location.pathname.replace(/\/$/, '');
-    const AUTO_APPLY = true;
-    let profileTargets = [{ value: 'wan', label: 'WAN' }];
-    let policyMap = {};
-    let profileMap = {};
-    let cachedDevices = [];
-    let cachedPolicies = [];
-    let multiebaySettings = { api_base: 'https://multiebay.com', api_key_saved: false, api_key: '', allow_http_proxy: '1' };
-
-    function h(v) {
-      return String(v || '').replace(/[&<>"']/g, function (s) {
-        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[s];
-      });
-    }
-
-    function showToast(message, ok) {
-      const t = document.getElementById('toast');
-      t.textContent = message;
-      t.className = 'toast show ' + (ok ? 'ok' : 'error');
-      window.clearTimeout(showToast._timer);
-      showToast._timer = window.setTimeout(() => { t.className = 'toast'; }, 2200);
-    }
-
-    function statusBadge(target) {
-      if (target === 'wan') {
-        return '<span class="badge wan">WAN</span>';
-      }
-      return '<span class="badge vpn">' + h(targetLabel(target)) + '</span>';
-    }
-
-    function connBadge(connected, state) {
-      if (connected) {
-        return '<span class="badge connected">Connected</span>';
-      }
-      const st = state && state !== 'unknown' ? (' (' + h(state) + ')') : '';
-      return '<span class="badge offline">Offline' + st + '</span>';
-    }
-
-    function healthBadge(status) {
-      const s = h(status || 'unknown');
-      return '<span class="badge ' + s + '">' + s + '</span>';
-    }
-
-    function apiGet(path) {
-      return fetch(basePath + path, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-        .then(r => r.json());
-    }
-
-    function apiPost(path, data) {
-      const body = new URLSearchParams(data || {}).toString();
-      return fetch(basePath + path, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        body: body
-      }).then(r => r.json());
-    }
-
-    function renderTargetOptions() {
-      document.querySelectorAll('select[data-target-for], #policy-target').forEach(sel => {
-        const keep = sel.value || 'wan';
-        sel.innerHTML = '';
-        profileTargets.forEach(target => {
-          const opt = document.createElement('option');
-          opt.value = target.value;
-          opt.textContent = target.label;
-          sel.appendChild(opt);
-        });
-        sel.value = profileTargets.some(t => t.value === keep) ? keep : 'wan';
-      });
-    }
-
-    function targetLabel(targetValue) {
-      const hit = profileTargets.find(t => t.value === targetValue);
-      if (!hit) {
-        return targetValue;
-      }
-      if (targetValue === 'wan') {
-        return 'WAN';
-      }
-      return hit.label.split(' [')[0];
-    }
-
-    function slugifyProfileId(value, fallback) {
-      const raw = String(value || '').toLowerCase()
-        .replace(/[^a-z0-9]+/g, '_')
-        .replace(/^_+|_+$/g, '')
-        .replace(/_{2,}/g, '_')
-        .slice(0, 24);
-      return raw || fallback;
-    }
-
-    function loadMultiEbaySettings() {
-      return apiGet('/multiebay_settings').then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Unable to load MultiEbay settings');
-        }
-        multiebaySettings = {
-          api_base: res.api_base || 'https://multiebay.com',
-          api_key_saved: !!res.api_key_saved,
-          api_key: res.api_key || '',
-          allow_http_proxy: res.allow_http_proxy || '1'
-        };
-        document.getElementById('multiebay-api-base').value = multiebaySettings.api_base;
-        document.getElementById('multiebay-allow-http').value = multiebaySettings.allow_http_proxy;
-        const savedKeyInput = document.getElementById('multiebay-saved-key');
-        savedKeyInput.type = 'password';
-        savedKeyInput.value = multiebaySettings.api_key || '';
-        document.getElementById('multiebay-settings-state').textContent = multiebaySettings.api_key_saved
-          ? 'API key is already saved on this router.'
-          : 'No API key saved on this router yet.';
-      }).catch(err => {
-        document.getElementById('multiebay-settings-state').textContent = err.message || 'Unable to load MultiEbay settings.';
-      });
-    }
-
-    function saveMultiEbaySettings() {
-      const apiBase = document.getElementById('multiebay-api-base').value.trim() || 'https://multiebay.com';
-      const apiKey = document.getElementById('multiebay-api-key').value.trim();
-      const allowHttp = document.getElementById('multiebay-allow-http').value || '1';
-
-      apiPost('/multiebay_settings_save', {
-        api_base: apiBase,
-        api_key: apiKey,
-        allow_http_proxy: allowHttp
-      }).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Unable to save MultiEbay settings');
-        }
-        document.getElementById('multiebay-api-key').value = '';
-        document.getElementById('multiebay-settings-state').textContent = 'MultiEbay settings saved on router.';
-        showToast('Saved MultiEbay settings', true);
-        return loadMultiEbaySettings();
-      }).catch(err => {
-        document.getElementById('multiebay-settings-state').textContent = err.message || 'Unable to save MultiEbay settings.';
-        showToast(err.message || 'Unable to save MultiEbay settings', false);
-      });
-    }
-
-    function toggleMultiEbayKeyView() {
-      const keyInput = document.getElementById('multiebay-saved-key');
-      keyInput.type = keyInput.type === 'password' ? 'text' : 'password';
-    }
-
-    function clearMultiEbayApiKey() {
-      apiPost('/multiebay_settings_clear', {}).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Unable to delete API key');
-        }
-        document.getElementById('multiebay-api-key').value = '';
-        document.getElementById('multiebay-saved-key').value = '';
-        document.getElementById('multiebay-saved-key').type = 'password';
-        showToast('Deleted saved API key', true);
-        return loadMultiEbaySettings();
-      }).catch(err => {
-        showToast(err.message || 'Unable to delete API key', false);
-      });
-    }
-
-    function applyIfNeeded() {
-      if (!AUTO_APPLY) {
-        return Promise.resolve();
-      }
-      return apiPost('/apply', {}).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Apply failed');
-        }
-      });
-    }
-
-    function setDeviceTarget(section, mac, ip, hostname, target) {
-      return apiPost('/policy', {
-        section: section,
-        mac: mac,
-        ip: ip,
-        hostname: hostname,
-        target: target
-      }).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Update failed');
-        }
-        return applyIfNeeded();
-      }).then(() => {
-        showToast('Set ' + (hostname || mac) + ' -> ' + targetLabel(target), true);
-        return refreshAll();
-      }).catch(err => {
-        showToast(err.message || 'Update failed', false);
-      });
-    }
-
-    function loadStatus() {
-      return apiGet('/status').then(d => {
-        document.getElementById('vpn-up').textContent = d.up || 0;
-        document.getElementById('vpn-down').textContent = d.down || 0;
-        document.getElementById('last-sync').textContent = d.timestamp || 'Ready';
-      });
-    }
-
-    function loadProfiles() {
-      return apiGet('/profiles').then(d => {
-        const profiles = d.profiles || [];
-        profileMap = {};
-        document.getElementById('profile-count').textContent = profiles.length + ' profiles';
-        profileTargets = [{ value: 'wan', label: 'WAN (No VPN)' }].concat(profiles.map(p => ({
-          value: p.id,
-          label: (p.name ? p.name : p.id) + ' [' + p.id + ']'
-        })));
-        renderTargetOptions();
-
-        const tb = document.querySelector('#profiles-table tbody');
-        tb.innerHTML = '';
-        profiles.forEach(p => {
-          profileMap[p.id] = p;
-          const tr = document.createElement('tr');
-          tr.innerHTML = '<td>' + h(p.name || p.id) + '</td>' +
-            '<td>' + h(p.id) + '</td>' +
-            '<td>' + h(p.endpoint || '') + '</td>' +
-            '<td>' + healthBadge(p.status) + '</td>' +
-            '<td>' + h(p.handshake_age) + 's</td>' +
-            '<td><div class="row-actions">' +
-            '<button class="btn tiny ghost" onclick="editProfile(\'' + h(p.id) + '\')">Edit</button>' +
-            '<button class="btn tiny" onclick="testProfile(\'' + h(p.id) + '\')">Test</button>' +
-            '<button class="btn tiny bad" onclick="deleteProfile(\'' + h(p.id) + '\')">Delete</button>' +
-            '</div></td>';
-          tb.appendChild(tr);
-        });
-      });
-    }
-
-    function clearProfileForm() {
-      document.getElementById('profile-id').value = '';
-      document.getElementById('profile-name').value = '';
-      document.getElementById('profile-endpoint-host').value = '';
-      document.getElementById('profile-endpoint-port').value = '';
-      document.getElementById('profile-address').value = '';
-      document.getElementById('profile-dns').value = '';
-      document.getElementById('profile-allowed-ips').value = '';
-      document.getElementById('profile-keepalive').value = '';
-      document.getElementById('profile-mtu').value = '';
-      document.getElementById('profile-public-key').value = '';
-      document.getElementById('profile-private-key').value = '';
-      document.getElementById('profile-enabled').value = '1';
-    }
-
-    function editProfile(id) {
-      const p = profileMap[id];
-      if (!p) {
-        return;
-      }
-
-      const endpoint = (p.endpoint || '').split(':');
-      document.getElementById('profile-id').value = p.id || '';
-      document.getElementById('profile-name').value = p.name || '';
-      document.getElementById('profile-endpoint-host').value = endpoint[0] || '';
-      document.getElementById('profile-endpoint-port').value = endpoint[1] || '';
-      document.getElementById('profile-address').value = p.address || '';
-      document.getElementById('profile-dns').value = p.dns || '';
-      document.getElementById('profile-allowed-ips').value = p.allowed_ips || '0.0.0.0/0';
-      document.getElementById('profile-keepalive').value = p.persistent_keepalive || '25';
-      document.getElementById('profile-mtu').value = p.mtu || '';
-      document.getElementById('profile-public-key').value = p.public_key || '';
-      document.getElementById('profile-private-key').value = '';
-      document.getElementById('profile-enabled').value = p.enabled === '0' ? '0' : '1';
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    function saveProfile() {
-      const id = document.getElementById('profile-id').value.trim();
-      if (!id) {
-        showToast('Profile ID is required', false);
-        return;
-      }
-
-      apiPost('/profile', {
-        id: id,
-        name: document.getElementById('profile-name').value.trim(),
-        endpoint_host: document.getElementById('profile-endpoint-host').value.trim(),
-        endpoint_port: document.getElementById('profile-endpoint-port').value.trim(),
-        public_key: document.getElementById('profile-public-key').value.trim(),
-        private_key: document.getElementById('profile-private-key').value.trim(),
-        address: document.getElementById('profile-address').value.trim(),
-        dns: document.getElementById('profile-dns').value.trim(),
-        allowed_ips: document.getElementById('profile-allowed-ips').value.trim(),
-        mtu: document.getElementById('profile-mtu').value.trim(),
-        persistent_keepalive: document.getElementById('profile-keepalive').value.trim(),
-        enabled: document.getElementById('profile-enabled').value,
-        preshared_key: ''
-      }).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Save profile failed');
-        }
-        return applyIfNeeded().then(() => ({ applied: true })).catch(err => ({ applied: false, error: err }));
-      }).then(info => {
-        return refreshAll().then(() => {
-          if (info && info.applied === false) {
-            showToast('Profile saved, but apply failed: ' + ((info.error && info.error.message) ? info.error.message : 'unknown'), false);
-            return;
-          }
-          showToast('Profile saved', true);
-        });
-      }).catch(err => {
-        showToast(err.message || 'Save profile failed', false);
-      });
-    }
-
-    function testProfile(id) {
-      apiPost('/test', { id: id }).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Test failed');
-        }
-        const state = res.state || 'unknown';
-        const latency = res.latency || 'n/a';
-        showToast('Test ' + id + ': ' + state + ', ' + latency, true);
-      }).catch(err => {
-        showToast(err.message || 'Test failed', false);
-      });
-    }
-
-    function deleteProfile(id) {
-      if (!window.confirm('Delete profile ' + id + '?')) {
-        return;
-      }
-
-      apiPost('/profile_delete', { id: id }).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Delete profile failed');
-        }
-        return applyIfNeeded().then(() => {
-          showToast('Profile deleted', true);
-          return refreshAll();
-        });
-      }).catch(err => {
-        showToast(err.message || 'Delete profile failed', false);
-      });
-    }
-
-    function loadDevices() {
-      return Promise.all([apiGet('/devices'), apiGet('/policies')]).then(results => {
-        cachedDevices = results[0].devices || [];
-        cachedPolicies = results[1].policies || [];
-        renderDevices();
-      });
-    }
-
-    function renderDevices() {
-      const targetByMac = {};
-      cachedPolicies.forEach(p => {
-        if (p.mac) {
-          targetByMac[p.mac.toLowerCase()] = p.target || 'wan';
-        }
-      });
-
-      const vpnCount = profileTargets.filter(t => t.value !== 'wan').length;
-      const compactRouteMode = vpnCount >= 4;
-
-      const q = (document.getElementById('device-search') ? document.getElementById('device-search').value : '').trim().toLowerCase();
-      const f = (document.getElementById('device-filter') ? document.getElementById('device-filter').value : 'all');
-
-      const tb = document.querySelector('#devices-table tbody');
-      tb.innerHTML = '';
-
-      cachedDevices.forEach(dev => {
-        const mac = (dev.mac || '').toLowerCase();
-        const ip = dev.ip || '';
-        const host = dev.hostname || 'unknown';
-        const state = dev.state || 'unknown';
-        const connected = !!dev.connected;
-        const defaultTarget = targetByMac[mac] || 'wan';
-
-        const hay = (host + ' ' + ip + ' ' + mac).toLowerCase();
-        if (q && hay.indexOf(q) === -1) {
-          return;
-        }
-        if (f === 'connected' && !connected) {
-          return;
-        }
-        if (f === 'offline' && connected) {
-          return;
-        }
-        if (f === 'vpn' && defaultTarget === 'wan') {
-          return;
-        }
-        if (f === 'wan' && defaultTarget !== 'wan') {
-          return;
-        }
-
-        const section = 'policy_' + mac.replace(/:/g, '').replace(/[^a-z0-9_]/g, '');
-        const tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + h(host) + '</td>' +
-          '<td>' + h(ip) + '</td>' +
-          '<td>' + h(dev.mac || '') + '</td>' +
-          '<td>' + connBadge(connected, state) + '</td>' +
-          '<td>' + statusBadge(defaultTarget) + '</td>' +
-          '<td><div class="target-pills"></div></td>';
-        tb.appendChild(tr);
-
-        const actionHost = tr.querySelector('.target-pills');
-
-        if (!compactRouteMode) {
-          profileTargets.forEach(t => {
-            const btn = document.createElement('button');
-            btn.className = 'pill' + (t.value === defaultTarget ? ' active' : '');
-            btn.textContent = targetLabel(t.value);
-            btn.onclick = function () {
-              setDeviceTarget(section, dev.mac || '', dev.ip || '', dev.hostname || '', t.value);
-            };
-            actionHost.appendChild(btn);
-          });
-          return;
-        }
-
-        actionHost.className = 'target-compact';
-
-        const picker = document.createElement('select');
-        picker.className = 'route-select';
-        profileTargets.forEach(t => {
-          const opt = document.createElement('option');
-          opt.value = t.value;
-          opt.textContent = targetLabel(t.value);
-          picker.appendChild(opt);
-        });
-        picker.value = profileTargets.some(t => t.value === defaultTarget) ? defaultTarget : 'wan';
-        picker.onchange = function () {
-          setDeviceTarget(section, dev.mac || '', dev.ip || '', dev.hostname || '', picker.value);
-        };
-        actionHost.appendChild(picker);
-
-        const quickActions = document.createElement('div');
-        quickActions.className = 'target-compact-actions';
-
-        const wanBtn = document.createElement('button');
-        wanBtn.className = 'btn tiny ghost';
-        wanBtn.textContent = 'WAN';
-        wanBtn.onclick = function () {
-          if (defaultTarget === 'wan') {
-            return;
-          }
-          setDeviceTarget(section, dev.mac || '', dev.ip || '', dev.hostname || '', 'wan');
-        };
-        quickActions.appendChild(wanBtn);
-
-        const firstVpn = profileTargets.find(t => t.value !== 'wan');
-        if (firstVpn) {
-          const vpnBtn = document.createElement('button');
-          vpnBtn.className = 'btn tiny';
-          vpnBtn.textContent = 'VPN';
-          vpnBtn.onclick = function () {
-            setDeviceTarget(section, dev.mac || '', dev.ip || '', dev.hostname || '', picker.value === 'wan' ? firstVpn.value : picker.value);
-          };
-          quickActions.appendChild(vpnBtn);
-        }
-
-        actionHost.appendChild(quickActions);
-      });
-    }
-
-    function loadPolicies() {
-      return apiGet('/policies').then(d => {
-        const policies = d.policies || [];
-        policyMap = {};
-        document.getElementById('policy-count').textContent = policies.length;
-
-        const tb = document.querySelector('#policies-table tbody');
-        tb.innerHTML = '';
-
-        policies.forEach(p => {
-          policyMap[p.section] = p;
-          const tr = document.createElement('tr');
-          tr.innerHTML = '<td>' + h(p.section) + '</td>' +
-            '<td>' + h(p.hostname || '') + '</td>' +
-            '<td>' + h(p.mac || '') + '</td>' +
-            '<td>' + h(p.ip || '') + '</td>' +
-            '<td>' + statusBadge(p.target || 'wan') + '</td>' +
-            '<td><div class="row-actions">' +
-            '<button class="btn tiny warn" onclick="movePolicyToWan(\'' + h(p.section) + '\')">Remove VPN</button>' +
-            '<button class="btn tiny ghost" onclick="editPolicy(\'' + h(p.section) + '\')">Edit</button>' +
-            '<button class="btn tiny bad" onclick="deletePolicy(\'' + h(p.section) + '\')">Delete</button>' +
-            '</div></td>';
-          tb.appendChild(tr);
-        });
-      });
-    }
-
-    function loadAudit() {
-      return apiGet('/audit').then(d => {
-        document.getElementById('audit-log').value = (d.lines || []).join('\n');
-      });
-    }
-
-    function importConf() {
-      const fileInput = document.getElementById('import-file');
-      const profileId = document.getElementById('import-id').value.trim() || 'vpn_' + Date.now();
-      const status = document.getElementById('import-status');
-
-      if (!fileInput.files || !fileInput.files.length) {
-        status.textContent = 'Please choose a .conf file first.';
-        showToast('Missing import file', false);
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = function () {
-        apiPost('/import', { id: profileId, content: reader.result || '' })
-          .then(res => {
-            if (res.ok === false) {
-              throw new Error(res.error || 'Import failed');
-            }
-            status.textContent = 'Imported as ' + profileId;
-            return applyIfNeeded().then(() => {
-              showToast('Profile imported and applied', true);
-              return refreshAll();
+        // Tab Switching Logic
+        function switchTab(tabId, el) {
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
+            document.getElementById('tab-' + tabId).classList.remove('hidden');
+            
+            document.querySelectorAll('.menu-tab').forEach(t => {
+                t.classList.remove('bg-[#f4c130]', 'text-gray-900', 'shadow-sm', 'font-semibold');
+                t.classList.add('text-gray-300', 'hover:bg-white/5', 'font-medium');
             });
-          })
-          .catch(err => {
-            status.textContent = err.message || 'Import failed.';
-            showToast('Import failed', false);
-          });
-      };
-      reader.readAsText(fileInput.files[0]);
-    }
 
-    function importFromMultiEbayQuick() {
-      const status = document.getElementById('multiebay-status');
-      const apiBase = document.getElementById('multiebay-api-base').value.trim() || multiebaySettings.api_base || 'https://multiebay.com';
-      const apiKey = document.getElementById('multiebay-api-key').value.trim();
-      const proxyUrl = document.getElementById('multiebay-proxy-quick').value.trim();
-      const profileNameInput = document.getElementById('multiebay-profile-name').value.trim();
-      let profileId = '';
-      let clientName = '';
-
-      if (!multiebaySettings.api_key_saved && !apiKey) {
-        status.textContent = 'Save MultiEbay API key on router first.';
-        showToast('Save API key first', false);
-        return;
-      }
-
-      if (!proxyUrl) {
-        status.textContent = 'Paste proxy first.';
-        showToast('Missing proxy', false);
-        return;
-      }
-
-      profileId = slugifyProfileId(profileNameInput || proxyUrl, 'vpn_' + Date.now());
-      clientName = clientName || profileId;
-      const profileName = profileNameInput || profileId;
-
-      status.textContent = 'Creating gateway from proxy and importing WireGuard profile into router...';
-
-      apiPost('/multiebay_import', {
-        id: profileId,
-        api_base: apiBase,
-        api_key: apiKey,
-        proxy_url: proxyUrl,
-        gateway_name: '',
-        client_name: clientName,
-        profile_name: profileName,
-        allow_http_proxy: document.getElementById('multiebay-allow-http').value
-      }).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'MultiEbay import failed');
+            if(el) {
+                el.classList.remove('text-gray-300', 'hover:bg-white/5', 'font-medium');
+                el.classList.add('bg-[#f4c130]', 'text-gray-900', 'shadow-sm', 'font-semibold');
+            }
         }
 
-        document.getElementById('profile-id').value = profileId;
-        document.getElementById('profile-name').value = profileName;
-        document.getElementById('multiebay-proxy-quick').value = '';
-        document.getElementById('multiebay-api-key').value = '';
-        status.textContent = 'Imported profile ' + profileId + (res.gateway_name ? (' from gateway ' + res.gateway_name) : '') + '.';
+        function h(v) {
+            return String(v || '').replace(/[&<>"']/g, function (s) {
+                return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[s];
+            });
+        }
 
-        return applyIfNeeded().then(() => ({ profileId: profileId, gatewayName: res.gateway_name || '' }));
-      }).then(info => {
-        return refreshAll().then(() => {
-          showToast('MultiEbay VPN imported: ' + info.profileId, true);
+        function showToast(message, ok) {
+            const t = document.getElementById('toast');
+            t.textContent = message;
+            t.className = 'toast-msg show ' + (ok ? 'ok' : 'error');
+            window.clearTimeout(showToast._timer);
+            showToast._timer = window.setTimeout(() => { t.className = 'toast-msg'; }, 2500);
+        }
+
+        function apiGet(path) { return fetch(basePath + path, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json()); }
+        
+        function apiPost(path, data) {
+            const body = new URLSearchParams(data || {}).toString();
+            return fetch(basePath + path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' },
+                body: body
+            }).then(r => r.json());
+        }
+
+        function statusBadge(target) {
+            if (target === 'wan') return '<span class="badge wan">WAN</span>';
+            return '<span class="badge vpn">' + h(targetLabel(target)) + '</span>';
+        }
+
+        function healthBadge(st) { return '<span class="badge ' + h(st || 'unknown') + '">' + h(st || 'unk') + '</span>'; }
+
+        function renderTargetOptions() {
+            document.querySelectorAll('select[data-target-for], #policy-target').forEach(sel => {
+                const keep = sel.value || 'wan';
+                sel.innerHTML = '';
+                profileTargets.forEach(target => {
+                    const opt = document.createElement('option');
+                    opt.value = target.value;
+                    opt.textContent = target.label;
+                    sel.appendChild(opt);
+                });
+                sel.value = profileTargets.some(t => t.value === keep) ? keep : 'wan';
+            });
+        }
+
+        function targetLabel(val) {
+            const hit = profileTargets.find(t => t.value === val);
+            return hit ? (val === 'wan' ? 'WAN' : hit.label.split(' [')[0]) : val;
+        }
+
+        function applyIfNeeded() {
+            return apiPost('/apply', {}).then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Apply failed');
+            });
+        }
+
+        function loadStatus() {
+            return apiGet('/status').then(d => {
+                document.getElementById('vpn-up').textContent = d.up || 0;
+                document.getElementById('vpn-down').textContent = d.down || 0;
+                document.getElementById('last-sync').textContent = d.timestamp || new Date().toLocaleTimeString();
+            });
+        }
+
+        // WiFi
+        function loadWifiSettings(silent) {
+            return apiGet('/wifi').then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to load WiFi');
+                document.getElementById('wifi-ssid').value = res.ssid || '';
+                document.getElementById('wifi-key').value = res.key || '';
+                document.getElementById('wifi-encryption').value = res.encryption || 'sae-mixed';
+                document.getElementById('wifi-channel').value = res.channel || '';
+                document.getElementById('wifi-country').value = res.country || '';
+                document.getElementById('wifi-enabled').value = res.enabled === '0' ? '0' : '1';
+                document.getElementById('wifi-status').textContent = 'Live tracking radio: ' + (res.device || '-');
+            }).catch(e => {
+                document.getElementById('wifi-status').textContent = e.message;
+                if(!silent) showToast(e.message, false);
+            });
+        }
+
+        function saveWifiSettings() {
+            apiPost('/wifi_set', {
+                ssid: document.getElementById('wifi-ssid').value.trim(),
+                key: document.getElementById('wifi-key').value,
+                encryption: document.getElementById('wifi-encryption').value,
+                channel: document.getElementById('wifi-channel').value.trim(),
+                enabled: document.getElementById('wifi-enabled').value
+            }).then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to save WiFi');
+                showToast('WiFi config applied. Radio resetting...', true);
+                setTimeout(() => loadWifiSettings(true), 4000);
+            }).catch(e => showToast(e.message, false));
+        }
+
+        // MultiEbay
+        function loadMultiEbaySettings() {
+            return apiGet('/multiebay_settings').then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Failed MultiEbay config');
+                multiebaySettings = {
+                    api_base: res.api_base || 'https://multiebay.com',
+                    api_key_saved: !!res.api_key_saved,
+                    api_key: res.api_key || '',
+                    allow_http_proxy: res.allow_http_proxy || '1'
+                };
+                document.getElementById('multiebay-api-base').value = multiebaySettings.api_base;
+                document.getElementById('multiebay-allow-http').value = multiebaySettings.allow_http_proxy;
+                
+                const keyInput = document.getElementById('multiebay-saved-key');
+                keyInput.type = 'password';
+                keyInput.value = multiebaySettings.api_key;
+                
+                document.getElementById('multiebay-settings-state').textContent = multiebaySettings.api_key_saved 
+                    ? "✓ API Key securely stored on router"
+                    : "No key found on router.";
+            });
+        }
+
+        function saveMultiEbaySettings() {
+            const apiBase = document.getElementById('multiebay-api-base').value.trim() || 'https://multiebay.com';
+            const apiKey = document.getElementById('multiebay-api-key').value.trim();
+            const allowHttp = document.getElementById('multiebay-allow-http').value;
+
+            apiPost('/multiebay_settings_save', { api_base: apiBase, api_key: apiKey, allow_http_proxy: allowHttp })
+            .then(res => {
+                if (res.ok === false) throw new Error(res.error);
+                document.getElementById('multiebay-api-key').value = '';
+                showToast('Router proxy settings saved', true);
+                return loadMultiEbaySettings();
+            }).catch(e => showToast(e.message, false));
+        }
+
+        function toggleMultiEbayKeyView() {
+            const el = document.getElementById('multiebay-saved-key');
+            el.type = el.type === 'password' ? 'text' : 'password';
+        }
+
+        function clearMultiEbayApiKey() {
+            apiPost('/multiebay_settings_clear').then(res => {
+                if(res.ok===false) throw new Error(res.error);
+                showToast('API Key deleted from router', true);
+                return loadMultiEbaySettings();
+            }).catch(e=>showToast(e.message, false));
+        }
+
+        function importFromMultiEbayQuick() {
+            const status = document.getElementById('multiebay-status');
+            const pQuick = document.getElementById('multiebay-proxy-quick').value.trim();
+            const pName = document.getElementById('multiebay-profile-name').value.trim();
+
+            if (!multiebaySettings.api_key_saved) return showToast('Please save your API key first.', false);
+            if (!pQuick) return showToast('Missing proxy string', false);
+
+            let safeId = pName || pQuick;
+            safeId = String(safeId).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24);
+
+            status.textContent = 'Generating gateway and profile...';
+            apiPost('/multiebay_import', {
+                id: safeId,
+                proxy_url: pQuick,
+                profile_name: pName || safeId,
+                allow_http_proxy: document.getElementById('multiebay-allow-http').value
+            }).then(res => {
+                if (res.ok === false) throw new Error(res.error);
+                status.textContent = 'VPN Integrated successfully: ' + safeId;
+                document.getElementById('multiebay-proxy-quick').value = '';
+                return applyIfNeeded();
+            }).then(() => refreshAll()).then(() => showToast('Proxy integrated', true))
+            .catch(e => {
+                status.textContent = 'Integration failed: ' + e.message;
+                showToast(e.message, false);
+            });
+        }
+
+        // Profiles
+        function loadProfiles() {
+            return apiGet('/profiles').then(d => {
+                const profiles = d.profiles || [];
+                profileMap = {};
+                document.getElementById('profile-count-dash').textContent = profiles.length;
+                profileTargets = [{ value: 'wan', label: 'Direct WAN' }].concat(profiles.map(p => ({
+                    value: p.id,
+                    label: (p.name || p.id) + ' [' + p.id + ']'
+                })));
+                renderTargetOptions();
+
+                const tb = document.getElementById('profiles-table-body');
+                tb.innerHTML = '';
+                profiles.forEach(p => {
+                    profileMap[p.id] = p;
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    tr.innerHTML = `
+                        <td class="px-6 py-4 font-medium text-gray-800">${h(p.name || p.id)}</td>
+                        <td class="px-6 py-4 text-gray-500 font-mono text-xs">${h(p.id)}</td>
+                        <td class="px-6 py-4 text-gray-500">${h(p.endpoint)}</td>
+                        <td class="px-6 py-4">${healthBadge(p.status)}</td>
+                        <td class="px-6 py-4 text-gray-500">${h(p.handshake_age)}s</td>
+                        <td class="px-6 py-4 text-right space-x-2">
+                            <button class="btn-secondary btn-tiny" onclick="editProfile('${h(p.id)}')">Edit</button>
+                            <button class="btn-danger btn-tiny" onclick="deleteProfile('${h(p.id)}')">Del</button>
+                        </td>
+                    `;
+                    tb.appendChild(tr);
+                });
+            });
+        }
+
+        function editProfile(id) {
+            const p = profileMap[id];
+            if (!p) return;
+            document.getElementById('profile-id').value = id;
+            document.getElementById('profile-name').value = p.name || '';
+            document.getElementById('profile-endpoint-host').value = p.endpoint ? p.endpoint.split(':')[0] : '';
+            document.getElementById('profile-endpoint-port').value = p.endpoint && p.endpoint.includes(':') ? p.endpoint.split(':')[1] : '51820';
+            document.getElementById('profile-address').value = p.address || '';
+            document.getElementById('profile-dns').value = p.dns || '';
+            document.getElementById('profile-allowed-ips').value = p.allowed_ips || '';
+            document.getElementById('profile-keepalive').value = p.persistent_keepalive || '25';
+            document.getElementById('profile-mtu').value = p.mtu || '';
+            document.getElementById('profile-enabled').value = p.enabled || '1';
+            document.getElementById('profile-public-key').value = p.public_key || '';
+            document.getElementById('profile-private-key').value = '';
+            document.getElementById('profile-id').focus();
+        }
+
+        function clearProfileForm() {
+            ['profile-id','profile-name','profile-endpoint-host','profile-endpoint-port','profile-address','profile-dns','profile-allowed-ips','profile-keepalive','profile-mtu','profile-public-key','profile-private-key'].forEach(id => {
+                document.getElementById(id).value = '';
+            });
+            document.getElementById('profile-enabled').value = '1';
+        }
+
+        function saveProfile() {
+            const id = document.getElementById('profile-id').value.trim();
+            if (!id) return showToast('Profile ID required', false);
+            apiPost('/profile', {
+                id: id,
+                name: document.getElementById('profile-name').value.trim(),
+                endpoint_host: document.getElementById('profile-endpoint-host').value.trim(),
+                endpoint_port: document.getElementById('profile-endpoint-port').value.trim(),
+                address: document.getElementById('profile-address').value.trim(),
+                dns: document.getElementById('profile-dns').value.trim(),
+                allowed_ips: document.getElementById('profile-allowed-ips').value.trim(),
+                persistent_keepalive: document.getElementById('profile-keepalive').value.trim(),
+                mtu: document.getElementById('profile-mtu').value.trim(),
+                public_key: document.getElementById('profile-public-key').value.trim(),
+                private_key: document.getElementById('profile-private-key').value.trim(),
+                enabled: document.getElementById('profile-enabled').value
+            }).then(res => {
+                if (res.ok === false) throw new Error(res.error);
+                clearProfileForm();
+                return applyIfNeeded();
+            }).then(() => refreshAll()).then(() => showToast('Profile saved', true))
+            .catch(e => showToast(e.message, false));
+        }
+
+        function deleteProfile(id) {
+            if (!confirm('Delete VPN profile: ' + id + '?')) return;
+            apiPost('/profile_delete', { id: id }).then(res => {
+                if (res.ok === false) throw new Error(res.error);
+                return applyIfNeeded();
+            }).then(()=>refreshAll()).then(()=>showToast('Profile deleted', true))
+            .catch(e=>showToast(e.message, false));
+        }
+
+        // Devices
+        function loadDevices() {
+            return apiGet('/devices').then(d => {
+                cachedDevices = d.devices || [];
+                renderDevices();
+            });
+        }
+
+        function renderDevices() {
+            const filter = document.getElementById('device-filter').value;
+            const term = document.getElementById('device-search').value.toLowerCase();
+            const tb = document.getElementById('devices-table-body');
+            tb.innerHTML = '';
+
+            cachedDevices.forEach(d => {
+                let target = 'wan';
+                let polSec = '';
+                const p = cachedPolicies.find(x => x.mac.toLowerCase() === d.mac.toLowerCase() || (x.ip && x.ip === d.ip));
+                if (p) { target = p.target || 'wan'; polSec = p.section; }
+
+                if (filter === 'connected' && (!d.connected || d.state==='unknown')) return;
+                if (filter === 'offline' && (d.connected && d.state!=='unknown')) return;
+                if (filter === 'vpn' && target === 'wan') return;
+                if (filter === 'wan' && target !== 'wan') return;
+
+                if (term) {
+                    if (!(d.hostname+'').toLowerCase().includes(term) && !d.ip.includes(term) && !d.mac.toLowerCase().includes(term)) return;
+                }
+
+                let optionsStr = profileTargets.map(pt => `<option value="${pt.value}" ${target===pt.value?'selected':''}>${pt.label}</option>`).join('');
+
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-50';
+                tr.innerHTML = `
+                    <td class="px-6 py-4 font-medium text-gray-800">${h(d.hostname!=='unknown'?d.hostname:'Unknown')}</td>
+                    <td class="px-6 py-4 text-gray-600">${h(d.ip)}</td>
+                    <td class="px-6 py-4 text-gray-500 font-mono text-xs">${h(d.mac)}</td>
+                    <td class="px-6 py-4"><span class="badge ${d.connected?'connected':'offline'}">${d.connected?'Online':'Offline'}</span></td>
+                    <td class="px-6 py-4">${statusBadge(target)}</td>
+                    <td class="px-6 py-4 flex items-center space-x-2">
+                        <select class="form-control text-xs py-1" style="width:160px" onchange="setRoute('${h(polSec)}', '${h(d.mac)}', '${h(d.ip)}', '${h(d.hostname)}', this.value)">
+                            ${optionsStr}
+                        </select>
+                    </td>
+                `;
+                tb.appendChild(tr);
+            });
+        }
+
+        function setRoute(section, mac, ip, hn, target) {
+            let secId = section;
+            if(!secId) {
+                secId = 'pol_' + mac.replace(/:/g, '') + '_' + Date.now().toString().slice(-4);
+            }
+            apiPost('/policy', { section: secId, mac: mac, ip: ip, hostname: hn==='unknown'?'':hn, target: target })
+            .then(res => {
+                if (res.ok === false) throw new Error(res.error);
+                return applyIfNeeded();
+            }).then(()=>refreshAll()).then(()=>showToast('Route updated instantly', true))
+            .catch(e=>showToast(e.message,false));
+        }
+
+        // Policies
+        function loadPolicies() {
+            return apiGet('/policies').then(d => {
+                cachedPolicies = d.policies || [];
+                const tb = document.getElementById('policies-table-body');
+                tb.innerHTML = '';
+                cachedPolicies.forEach(p => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    tr.innerHTML = `
+                        <td class="px-6 py-4 font-mono text-xs text-blue-600">${h(p.section)}</td>
+                        <td class="px-6 py-4 text-gray-800">${h(p.hostname)}</td>
+                        <td class="px-6 py-4 font-mono text-xs text-gray-500">${h(p.mac)}</td>
+                        <td class="px-6 py-4 text-gray-600">${h(p.ip)}</td>
+                        <td class="px-6 py-4">${statusBadge(p.target||'wan')}</td>
+                        <td class="px-6 py-4 text-right space-x-2">
+                            <button class="btn-secondary btn-tiny" onclick="deletePolicy('${h(p.section)}')">Delete</button>
+                        </td>
+                    `;
+                    tb.appendChild(tr);
+                });
+            });
+        }
+
+        function savePolicy() {
+            const sec = document.getElementById('policy-section').value.trim() || 'pol_' + Date.now();
+            apiPost('/policy', {
+                section: sec,
+                mac: document.getElementById('policy-mac').value.trim(),
+                ip: document.getElementById('policy-ip').value.trim(),
+                hostname: document.getElementById('policy-hostname').value.trim(),
+                target: document.getElementById('policy-target').value
+            }).then(res => {
+                if(res.ok === false) throw new Error(res.error);
+                clearPolicyForm();
+                return applyIfNeeded();
+            }).then(()=>refreshAll()).then(()=>showToast('Policy created', true))
+            .catch(e=>showToast(e.message,false));
+        }
+
+        function deletePolicy(sec) {
+            if(!confirm('Drop policy ' + sec + '?')) return;
+            apiPost('/policy_delete', { section: sec }).then(res => {
+                if(res.ok===false) throw new Error(res.error);
+                return applyIfNeeded();
+            }).then(()=>refreshAll()).then(()=>showToast('Policy deleted', true))
+            .catch(e=>showToast(e.message,false));
+        }
+
+        function clearPolicyForm() {
+            document.getElementById('policy-section').value='';
+            document.getElementById('policy-mac').value='';
+            document.getElementById('policy-ip').value='';
+            document.getElementById('policy-hostname').value='';
+        }
+
+        // Shared / Audit
+        function loadAudit() {
+            return apiGet('/audit').then(d => {
+                document.getElementById('audit-log').value = (d.lines || []).join('\n');
+            });
+        }
+
+        function refreshAll() {
+            return loadStatus()
+                .then(loadProfiles)
+                .then(loadPolicies)
+                .then(loadDevices)
+                .then(() => loadWifiSettings(true))
+                .then(loadMultiEbaySettings)
+                .catch(() => showToast('Refresh cycle failed', false));
+        }
+
+        // Init
+        document.addEventListener('DOMContentLoaded', () => {
+            switchTab('dashboard', document.querySelector('.menu-tab'));
+            refreshAll();
+            setInterval(() => { loadStatus(); loadDevices(); loadProfiles(); }, 8000);
         });
-      }).catch(err => {
-        status.textContent = err.message || 'MultiEbay import failed.';
-        showToast(err.message || 'MultiEbay import failed', false);
-      });
-    }
 
-    function savePolicy() {
-      const section = document.getElementById('policy-section').value.trim() || ('policy_' + Date.now());
-      const mac = document.getElementById('policy-mac').value.trim();
-      const target = document.getElementById('policy-target').value || 'wan';
-      if (!mac) {
-        showToast('MAC address is required', false);
-        return;
-      }
-
-      apiPost('/policy', {
-        section: section,
-        mac: mac,
-        ip: document.getElementById('policy-ip').value.trim(),
-        hostname: document.getElementById('policy-hostname').value.trim(),
-        target: target
-      }).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Save failed');
-        }
-        return applyIfNeeded().then(() => {
-          showToast('Policy saved', true);
-          return refreshAll();
-        });
-      }).catch(err => {
-        showToast(err.message || 'Policy save failed', false);
-      });
-    }
-
-    function clearPolicyForm() {
-      document.getElementById('policy-section').value = '';
-      document.getElementById('policy-hostname').value = '';
-      document.getElementById('policy-mac').value = '';
-      document.getElementById('policy-ip').value = '';
-      document.getElementById('policy-target').value = 'wan';
-    }
-
-    function editPolicy(section) {
-      const p = policyMap[section];
-      if (!p) {
-        return;
-      }
-      document.getElementById('policy-section').value = p.section || '';
-      document.getElementById('policy-hostname').value = p.hostname || '';
-      document.getElementById('policy-mac').value = p.mac || '';
-      document.getElementById('policy-ip').value = p.ip || '';
-      document.getElementById('policy-target').value = p.target || 'wan';
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    function movePolicyToWan(section) {
-      const p = policyMap[section];
-      if (!p) {
-        return;
-      }
-
-      setDeviceTarget(p.section, p.mac, p.ip || '', p.hostname || '', 'wan');
-    }
-
-    function deletePolicy(section) {
-      if (!window.confirm('Delete policy ' + section + '?')) {
-        return;
-      }
-
-      apiPost('/policy_delete', { section: section }).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Delete failed');
-        }
-        return applyIfNeeded().then(() => {
-          showToast('Policy deleted', true);
-          return refreshAll();
-        });
-      }).catch(err => {
-        showToast(err.message || 'Delete failed', false);
-      });
-    }
-
-    function applyCfg() {
-      apiPost('/apply', {}).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Apply failed');
-        }
-        showToast('Configuration applied', true);
-        return refreshAll();
-      }).catch(err => {
-        showToast(err.message || 'Apply failed', false);
-      });
-    }
-
-    function rollbackCfg() {
-      apiPost('/rollback', {}).then(res => {
-        if (res.ok === false) {
-          throw new Error(res.error || 'Rollback failed');
-        }
-        showToast('Rollback done', true);
-        return refreshAll();
-      }).catch(err => {
-        showToast(err.message || 'Rollback failed', false);
-      });
-    }
-
-    function refreshAll() {
-      return loadStatus()
-        .then(loadProfiles)
-        .then(loadPolicies)
-        .then(loadDevices)
-        .then(loadMultiEbaySettings)
-        .catch(() => {
-          showToast('Failed to refresh dashboard', false);
-        });
-    }
-
-    refreshAll();
-    loadAudit();
-    setInterval(() => {
-      refreshAll();
-    }, 8000);
-  </script>
+    </script>
 </body>
 </html>

@@ -18,6 +18,8 @@ function index()
     entry({"admin", "services", "vpnmanager", "profile_delete"}, call("rpc_profile_delete")).leaf = true
     entry({"admin", "services", "vpnmanager", "test"}, call("rpc_test")).leaf = true
     entry({"admin", "services", "vpnmanager", "import"}, call("rpc_import")).leaf = true
+    entry({"admin", "services", "vpnmanager", "wifi"}, call("rpc_wifi")).leaf = true
+    entry({"admin", "services", "vpnmanager", "wifi_set"}, call("rpc_wifi_set")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings"}, call("rpc_multiebay_settings")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings_save"}, call("rpc_multiebay_settings_save")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings_clear"}, call("rpc_multiebay_settings_clear")).leaf = true
@@ -153,6 +155,27 @@ function rpc_import()
     end
 
     run_rpc("import_profile " .. sq(id) .. " " .. sq(path))
+end
+
+function rpc_wifi()
+    run_rpc("list_wifi")
+end
+
+function rpc_wifi_set()
+    local ssid = luci.http.formvalue("ssid") or ""
+    local key = luci.http.formvalue("key") or ""
+    local encryption = luci.http.formvalue("encryption") or ""
+    local channel = luci.http.formvalue("channel") or ""
+    local enabled = luci.http.formvalue("enabled") or "1"
+
+    run_rpc(
+        "set_wifi " ..
+        sq(ssid) .. " " ..
+        sq(key) .. " " ..
+        sq(encryption) .. " " ..
+        sq(channel) .. " " ..
+        sq(enabled)
+    )
 end
 
 function rpc_multiebay_import()

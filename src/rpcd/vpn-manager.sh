@@ -217,6 +217,69 @@ clear_multiebay_api_key() {
     echo '{"ok":true}'
 }
 
+list_wifi() {
+    iface="$(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p' | head -n1)"
+    [ -n "$iface" ] || {
+        echo '{"ok":false,"error":"wifi iface not found"}'
+        return
+    }
+
+    device="$(uci -q get wireless.$iface.device)"
+    ssid="$(uci -q get wireless.$iface.ssid)"
+    encryption="$(uci -q get wireless.$iface.encryption)"
+    key="$(uci -q get wireless.$iface.key)"
+    channel="$(uci -q get wireless.$device.channel)"
+    country="$(uci -q get wireless.$device.country)"
+    iface_disabled="$(uci -q get wireless.$iface.disabled)"
+    dev_disabled="$(uci -q get wireless.$device.disabled)"
+
+    enabled="1"
+    [ "$iface_disabled" = "1" ] && enabled="0"
+    [ "$dev_disabled" = "1" ] && enabled="0"
+
+    printf '{"ok":true,"iface":"%s","device":"%s","ssid":"%s","encryption":"%s","key":"%s","channel":"%s","country":"%s","enabled":"%s"}' \
+        "$(json_escape "$iface")" \
+        "$(json_escape "$device")" \
+        "$(json_escape "$ssid")" \
+        "$(json_escape "$encryption")" \
+        "$(json_escape "$key")" \
+        "$(json_escape "$channel")" \
+        "$(json_escape "$country")" \
+        "$enabled"
+}
+
+set_wifi() {
+    ssid="$2"
+    key="$3"
+    encryption="$4"
+    channel="$5"
+    enabled="$6"
+
+    iface="$(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p' | head -n1)"
+    [ -n "$iface" ] || {
+        echo '{"ok":false,"error":"wifi iface not found"}'
+        return
+    }
+    device="$(uci -q get wireless.$iface.device)"
+
+    [ -n "$ssid" ] && uci set "wireless.$iface.ssid=$ssid"
+    [ -n "$encryption" ] && uci set "wireless.$iface.encryption=$encryption"
+    [ -n "$key" ] && uci set "wireless.$iface.key=$key"
+    [ -n "$channel" ] && uci set "wireless.$device.channel=$channel"
+
+    if [ "$enabled" = "0" ]; then
+        uci set "wireless.$iface.disabled=1"
+        uci set "wireless.$device.disabled=1"
+    else
+        uci set "wireless.$iface.disabled=0"
+        uci set "wireless.$device.disabled=0"
+    fi
+
+    uci commit wireless
+    wifi reload >/dev/null 2>&1 || /etc/init.d/network reload >/dev/null 2>&1 || true
+    echo '{"ok":true}'
+}
+
 list_profiles() {
     printf '{"profiles":['
     first=1
@@ -710,6 +773,8 @@ case "$1" in
     delete_profile) delete_profile "$@" ;;
     test_profile) test_profile "$@" ;;
     import_profile) import_profile "$@" ;;
+    list_wifi) list_wifi ;;
+    set_wifi) set_wifi "$@" ;;
     list_multiebay_settings) list_multiebay_settings ;;
     save_multiebay_settings) save_multiebay_settings "$@" ;;
     clear_multiebay_api_key) clear_multiebay_api_key ;;
