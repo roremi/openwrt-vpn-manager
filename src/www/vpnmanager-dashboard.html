@@ -197,6 +197,7 @@
                                     <th class="px-6 py-4">MAC Address</th>
                                     <th class="px-6 py-4">Status</th>
                                     <th class="px-6 py-4">Current Route</th>
+                                    <th class="px-6 py-4">Exit IP</th>
                                     <th class="px-6 py-4">1-Tap Override</th>
                                 </tr>
                             </thead>
@@ -226,6 +227,7 @@
                                     <th class="px-6 py-4">ID</th>
                                     <th class="px-6 py-4">Endpoint</th>
                                     <th class="px-6 py-4">Status</th>
+                                    <th class="px-6 py-4">Exit IP</th>
                                     <th class="px-6 py-4">Handshake</th>
                                     <th class="px-6 py-4 text-right">Actions</th>
                                 </tr>
@@ -381,6 +383,39 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mt-6">
+                    <h3 class="text-lg font-bold text-gray-700 mb-4">WiFi VPN Profiles</h3>
+                    <p class="text-sm text-gray-500 mb-4">Tạo SSID riêng và gán một VPN cho toàn bộ thiết bị vào SSID đó. Các rule gán VPN theo thiết bị hiện tại vẫn giữ nguyên.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Profile ID</label><input id="wifi-profile-id" type="text" placeholder="wifi_shop_us" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">SSID</label><input id="wifi-profile-ssid" type="text" placeholder="Shop-US" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Password</label><input id="wifi-profile-key" type="text" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Security</label><select id="wifi-profile-encryption" class="form-control"><option value="sae-mixed">WPA2/WPA3 Mixed</option><option value="psk2">WPA2-PSK</option><option value="sae">WPA3-SAE</option><option value="none">Open</option></select></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Target VPN</label><select id="wifi-profile-target" class="form-control" data-target-for="wifi-profile"></select></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Enabled</label><select id="wifi-profile-enabled" class="form-control"><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
+                    </div>
+                    <div class="flex space-x-3 mb-5">
+                        <button class="btn-primary" onclick="saveWifiProfile()">Save WiFi VPN</button>
+                        <button class="btn-secondary" onclick="clearWifiProfileForm()">Clear</button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm whitespace-nowrap">
+                            <thead class="uppercase tracking-wider border-b border-gray-200 bg-gray-50 text-gray-500 font-semibold text-xs">
+                                <tr>
+                                    <th class="px-6 py-4">SSID</th>
+                                    <th class="px-6 py-4">Network</th>
+                                    <th class="px-6 py-4">Subnet</th>
+                                    <th class="px-6 py-4">Target</th>
+                                    <th class="px-6 py-4">Status</th>
+                                    <th class="px-6 py-4">Exit IP</th>
+                                    <th class="px-6 py-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="wifi-profiles-body" class="divide-y divide-gray-100"></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <!-- Policies Tab -->
@@ -450,6 +485,8 @@
         let profileMap = {};
         let cachedDevices = [];
         let cachedPolicies = [];
+        let cachedWifiProfiles = [];
+        let cachedRouteStatus = { wan: null, profiles: [] };
         let multiebaySettings = { api_base: 'https://multiebay.com', api_key_saved: false, api_key: '', allow_http_proxy: '1' };
 
         // Tab Switching Logic
@@ -496,6 +533,38 @@
         function statusBadge(target) {
             if (target === 'wan') return '<span class="badge wan">WAN</span>';
             return '<span class="badge vpn">' + h(targetLabel(target)) + '</span>';
+        }
+
+        function countryFlag(code) {
+            const cc = String(code || '').toUpperCase();
+            if (!/^[A-Z]{2}$/.test(cc)) return '';
+            return cc.replace(/./g, c => String.fromCodePoint(127397 + c.charCodeAt(0)));
+        }
+
+        function routeStatusForTarget(target) {
+            if (!target || target === 'wan') return cachedRouteStatus.wan || null;
+            return (cachedRouteStatus.profiles || []).find(p => p.id === target) || null;
+        }
+
+        function renderExitIpCell(routeObj) {
+            const ipInfo = routeObj && routeObj.ip ? routeObj.ip : routeObj;
+            if (!ipInfo || ipInfo.success === false) {
+                return '<span class="text-xs text-gray-400">Checking...</span>';
+            }
+            return '<div class="flex items-center gap-2">' +
+                '<span>' + countryFlag(ipInfo.country_code || '') + '</span>' +
+                '<span class="text-xs text-gray-500">' + h(ipInfo.country_code || '--') + '</span>' +
+                '<span class="font-mono text-xs text-gray-700">' + h(ipInfo.ip || '-') + '</span>' +
+                '</div>';
+        }
+
+        function loadRouteStatus() {
+            return apiGet('/route_status').then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to load route status');
+                cachedRouteStatus = res || { wan: null, profiles: [] };
+            }).catch(() => {
+                cachedRouteStatus = { wan: null, profiles: [] };
+            });
         }
 
         function healthBadge(st) { return '<span class="badge ' + h(st || 'unknown') + '">' + h(st || 'unk') + '</span>'; }
@@ -562,6 +631,92 @@
                 showToast('WiFi config applied. Radio resetting...', true);
                 setTimeout(() => loadWifiSettings(true), 4000);
             }).catch(e => showToast(e.message, false));
+        }
+
+        function loadWifiProfiles() {
+            return apiGet('/wifi_profiles').then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to load WiFi VPN profiles');
+                cachedWifiProfiles = res.profiles || [];
+                renderWifiProfiles();
+            }).catch(e => {
+                const tb = document.getElementById('wifi-profiles-body');
+                if (tb) {
+                    tb.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-sm text-red-500">' + h(e.message || 'Unable to load WiFi VPN profiles') + '</td></tr>';
+                }
+            });
+        }
+
+        function renderWifiProfiles() {
+            const tb = document.getElementById('wifi-profiles-body');
+            if (!tb) return;
+            tb.innerHTML = '';
+
+            cachedWifiProfiles.forEach(item => {
+                const routeObj = routeStatusForTarget(item.target);
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-50';
+                tr.innerHTML = `
+                    <td class="px-6 py-4 font-medium text-gray-800">${h(item.ssid)}</td>
+                    <td class="px-6 py-4 text-gray-600">${h(item.network)}</td>
+                    <td class="px-6 py-4 text-gray-600">${h(item.subnet)}</td>
+                    <td class="px-6 py-4">${statusBadge(item.target || 'wan')}</td>
+                    <td class="px-6 py-4">${healthBadge(item.status || (item.target === 'wan' ? 'healthy' : 'unknown'))}</td>
+                    <td class="px-6 py-4">${renderExitIpCell(routeObj)}</td>
+                    <td class="px-6 py-4 text-right space-x-2">
+                        <button class="btn-secondary btn-tiny" onclick="editWifiProfile('${h(item.id)}')">Edit</button>
+                        <button class="btn-danger btn-tiny" onclick="deleteWifiProfile('${h(item.id)}')">Delete</button>
+                    </td>`;
+                tb.appendChild(tr);
+            });
+
+            if (!cachedWifiProfiles.length) {
+                tb.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-sm text-gray-400">No WiFi VPN profiles yet.</td></tr>';
+            }
+        }
+
+        function clearWifiProfileForm() {
+            document.getElementById('wifi-profile-id').value = '';
+            document.getElementById('wifi-profile-ssid').value = '';
+            document.getElementById('wifi-profile-key').value = '';
+            document.getElementById('wifi-profile-encryption').value = 'sae-mixed';
+            document.getElementById('wifi-profile-target').value = 'wan';
+            document.getElementById('wifi-profile-enabled').value = '1';
+        }
+
+        function editWifiProfile(id) {
+            const item = cachedWifiProfiles.find(entry => entry.id === id);
+            if (!item) return;
+            document.getElementById('wifi-profile-id').value = item.id || '';
+            document.getElementById('wifi-profile-ssid').value = item.ssid || '';
+            document.getElementById('wifi-profile-key').value = item.key || '';
+            document.getElementById('wifi-profile-encryption').value = item.encryption || 'sae-mixed';
+            document.getElementById('wifi-profile-target').value = item.target || 'wan';
+            document.getElementById('wifi-profile-enabled').value = item.enabled === '0' ? '0' : '1';
+        }
+
+        function saveWifiProfile() {
+            apiPost('/wifi_profile', {
+                id: document.getElementById('wifi-profile-id').value.trim(),
+                ssid: document.getElementById('wifi-profile-ssid').value.trim(),
+                key: document.getElementById('wifi-profile-key').value,
+                encryption: document.getElementById('wifi-profile-encryption').value,
+                target: document.getElementById('wifi-profile-target').value,
+                enabled: document.getElementById('wifi-profile-enabled').value
+            }).then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to save WiFi VPN profile');
+                clearWifiProfileForm();
+                return applyIfNeeded();
+            }).then(() => refreshAll()).then(() => showToast('WiFi VPN profile saved', true))
+            .catch(e => showToast(e.message, false));
+        }
+
+        function deleteWifiProfile(id) {
+            if (!confirm('Delete WiFi VPN profile: ' + id + '?')) return;
+            apiPost('/wifi_profile_delete', { id: id }).then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to delete WiFi VPN profile');
+                return applyIfNeeded();
+            }).then(() => refreshAll()).then(() => showToast('WiFi VPN profile deleted', true))
+            .catch(e => showToast(e.message, false));
         }
 
         // MultiEbay
@@ -659,6 +814,7 @@
                 tb.innerHTML = '';
                 profiles.forEach(p => {
                     profileMap[p.id] = p;
+                    const routeObj = routeStatusForTarget(p.id);
                     const tr = document.createElement('tr');
                     tr.className = 'hover:bg-gray-50';
                     tr.innerHTML = `
@@ -666,6 +822,7 @@
                         <td class="px-6 py-4 text-gray-500 font-mono text-xs">${h(p.id)}</td>
                         <td class="px-6 py-4 text-gray-500">${h(p.endpoint)}</td>
                         <td class="px-6 py-4">${healthBadge(p.status)}</td>
+                        <td class="px-6 py-4">${renderExitIpCell(routeObj)}</td>
                         <td class="px-6 py-4 text-gray-500">${h(p.handshake_age)}s</td>
                         <td class="px-6 py-4 text-right space-x-2">
                             <button class="btn-secondary btn-tiny" onclick="editProfile('${h(p.id)}')">Edit</button>
@@ -754,6 +911,7 @@
                 let polSec = '';
                 const p = cachedPolicies.find(x => x.mac.toLowerCase() === d.mac.toLowerCase() || (x.ip && x.ip === d.ip));
                 if (p) { target = p.target || 'wan'; polSec = p.section; }
+                const routeObj = routeStatusForTarget(target);
 
                 if (filter === 'connected' && (!d.connected || d.state==='unknown')) return;
                 if (filter === 'offline' && (d.connected && d.state!=='unknown')) return;
@@ -774,6 +932,7 @@
                     <td class="px-6 py-4 text-gray-500 font-mono text-xs">${h(d.mac)}</td>
                     <td class="px-6 py-4"><span class="badge ${d.connected?'connected':'offline'}">${d.connected?'Online':'Offline'}</span></td>
                     <td class="px-6 py-4">${statusBadge(target)}</td>
+                    <td class="px-6 py-4">${renderExitIpCell(routeObj)}</td>
                     <td class="px-6 py-4 flex items-center space-x-2">
                         <select class="form-control text-xs py-1" style="width:160px" onchange="setRoute('${h(polSec)}', '${h(d.mac)}', '${h(d.ip)}', '${h(d.hostname)}', this.value)">
                             ${optionsStr}
@@ -862,10 +1021,12 @@
 
         function refreshAll() {
             return loadStatus()
+                .then(loadRouteStatus)
                 .then(loadProfiles)
                 .then(loadPolicies)
                 .then(loadDevices)
                 .then(() => loadWifiSettings(true))
+                .then(loadWifiProfiles)
                 .then(loadMultiEbaySettings)
                 .catch(() => showToast('Refresh cycle failed', false));
         }

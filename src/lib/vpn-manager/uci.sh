@@ -227,6 +227,33 @@ vm_policy_set_device_target() {
     uci set "$VM_CFG.$section.enabled=1"
 }
 
+vm_wifi_profile_list() {
+    uci -q show "$VM_CFG" | sed -n 's/^vpn-manager\.\([^.=]*\)=wifi_profile$/\1/p'
+}
+
+vm_wifi_profile_exists() {
+    uci -q get "$VM_CFG.$1" >/dev/null 2>&1
+}
+
+vm_wifi_profile_next_subnet_id() {
+    local used id
+    used="$(uci -q show "$VM_CFG" | sed -n 's/^vpn-manager\.[^.]*\.subnet_id=\(.*\)$/\1/p' | tr -d "'")"
+    id=20
+    while [ "$id" -le 250 ]; do
+        echo "$used" | grep -qx "$id" || {
+            echo "$id"
+            return 0
+        }
+        id=$((id + 1))
+    done
+    echo 250
+}
+
+vm_wifi_profile_subnet_cidr() {
+    local subnet_id="$1"
+    printf '10.77.%s.0/24' "$subnet_id"
+}
+
 vm_commit_all() {
     uci commit "$VM_CFG"
     uci commit network

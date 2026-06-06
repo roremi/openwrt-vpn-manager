@@ -20,6 +20,10 @@ function index()
     entry({"admin", "services", "vpnmanager", "import"}, call("rpc_import")).leaf = true
     entry({"admin", "services", "vpnmanager", "wifi"}, call("rpc_wifi")).leaf = true
     entry({"admin", "services", "vpnmanager", "wifi_set"}, call("rpc_wifi_set")).leaf = true
+    entry({"admin", "services", "vpnmanager", "wifi_profiles"}, call("rpc_wifi_profiles")).leaf = true
+    entry({"admin", "services", "vpnmanager", "wifi_profile"}, call("rpc_wifi_profile")).leaf = true
+    entry({"admin", "services", "vpnmanager", "wifi_profile_delete"}, call("rpc_wifi_profile_delete")).leaf = true
+    entry({"admin", "services", "vpnmanager", "route_status"}, call("rpc_route_status")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings"}, call("rpc_multiebay_settings")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings_save"}, call("rpc_multiebay_settings_save")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings_clear"}, call("rpc_multiebay_settings_clear")).leaf = true
@@ -176,6 +180,38 @@ function rpc_wifi_set()
         sq(channel) .. " " ..
         sq(enabled)
     )
+end
+
+function rpc_wifi_profiles()
+    run_rpc("list_wifi_profiles")
+end
+
+function rpc_wifi_profile()
+    local id = luci.http.formvalue("id") or ""
+    local ssid = luci.http.formvalue("ssid") or ""
+    local key = luci.http.formvalue("key") or ""
+    local encryption = luci.http.formvalue("encryption") or "sae-mixed"
+    local target = luci.http.formvalue("target") or "wan"
+    local enabled = luci.http.formvalue("enabled") or "1"
+
+    run_rpc(
+        "save_wifi_profile " ..
+        sq(id) .. " " ..
+        sq(ssid) .. " " ..
+        sq(key) .. " " ..
+        sq(encryption) .. " " ..
+        sq(target) .. " " ..
+        sq(enabled)
+    )
+end
+
+function rpc_wifi_profile_delete()
+    local id = luci.http.formvalue("id") or ""
+    run_rpc("delete_wifi_profile " .. sq(id))
+end
+
+function rpc_route_status()
+    run_rpc("route_status")
 end
 
 function rpc_multiebay_import()

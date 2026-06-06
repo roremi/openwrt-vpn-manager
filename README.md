@@ -6,6 +6,8 @@ A production-oriented OpenWrt package for managing multiple WireGuard profiles, 
 
 - Multiple WireGuard profiles (import/create/edit/delete/enable/disable)
 - Per-device routing target: WAN or any VPN profile
+- Per-SSID WiFi VPN profiles: create a separate WiFi network and bind the whole SSID to one VPN
+- Exit IP visibility for WAN and VPN profiles, including country information/flags in the dashboard
 - Atomic apply flow with validation and rollback
 - Optional kill-switch per VPN profile
 - Health-check and watchdog auto-reconnect
@@ -98,6 +100,68 @@ ps | grep vpn-manager
 	 - your VPN profile for tunneled traffic
 4. Apply policy changes.
 5. Confirm active routing from the dashboard.
+
+## What Is New In The Latest Version
+
+### 1) MultiEbay quick import
+
+- Save your MultiEbay API key on the router once
+- Paste proxy in `ip:port:user:pass` or full proxy URL format
+- The router creates the gateway, creates a WireGuard client, imports it, and applies it
+
+### 2) WiFi VPN Profiles
+
+- Create a new SSID directly from the VPN Manager UI
+- Bind that SSID to `wan` or a specific VPN profile
+- Every client connected to that SSID uses the same target route automatically
+- Existing device-based VPN assignment still works and is not removed
+
+### 3) Exit IP and country visibility
+
+- Dashboard shows public IP information for WAN and VPN profiles
+- Devices and WiFi VPN profiles display the active exit IP based on the selected route target
+- Country information is included so you can confirm the tunnel location quickly
+
+## Updated Usage Guide
+
+### A) Route one device through one VPN
+
+1. Open `Services -> VPN Manager`
+2. Go to `Devices Routing`
+3. Find the device by hostname, IP, or MAC
+4. Change `1-Tap Override` to the VPN profile you want
+
+### B) Create one WiFi network that always uses one VPN
+
+1. Open `Services -> VPN Manager`
+2. Go to `WiFi Manager`
+3. Scroll to `WiFi VPN Profiles`
+4. Fill these fields:
+	 - `Profile ID`: internal config ID, for example `wifi_shop_us`
+	 - `SSID`: WiFi name users will see
+	 - `Password`
+	 - `Security`
+	 - `Target VPN`: choose the VPN profile or `wan`
+	 - `Enabled`
+5. Click `Save WiFi VPN`
+6. Connect a device to that new SSID
+7. Confirm the device gets an IP from the SSID subnet and check the exit IP in the dashboard
+
+### C) Import VPN from proxy using MultiEbay
+
+1. Open `Services -> VPN Manager`
+2. Go to `MultiEbay Import`
+3. Save your API key if not already saved on the router
+4. Paste proxy string
+5. Click `Generate & Apply`
+6. Wait for the profile to appear in `VPN Profiles`
+
+## Notes For WiFi VPN Profiles
+
+- Each WiFi VPN profile creates its own OpenWrt interface, DHCP scope, firewall zone, and subnet
+- This is separate from the default OpenWrt WiFi and from device-based routing rules
+- The latest version includes a fix to restart `dnsmasq` and `firewall` automatically after creating or deleting a WiFi VPN profile so clients can get DHCP immediately
+- In practice, do not create too many SSIDs on low-end routers even though the software supports multiple profiles
 
 ## One-liner Install
 
