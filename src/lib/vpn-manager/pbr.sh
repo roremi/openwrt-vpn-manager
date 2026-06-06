@@ -190,11 +190,11 @@ EOF
 
 vm_pbr_apply_rules() {
     {
-        echo "delete table inet vpn_manager"
-        echo "delete table ip vpn_manager_nat"
-        echo "delete table ip vpn_manager_dns"
-        echo "delete table inet vpn_manager_dns_guard"
-        echo "delete table inet vpn_manager_strict"
+        echo "destroy table inet vpn_manager"
+        echo "destroy table ip vpn_manager_nat"
+        echo "destroy table ip vpn_manager_dns"
+        echo "destroy table inet vpn_manager_dns_guard"
+        echo "destroy table inet vpn_manager_strict"
         cat "$VM_NFT_FILE"
         cat "$VM_NFT_NAT_FILE"
         cat "$VM_NFT_DNS_FILE"

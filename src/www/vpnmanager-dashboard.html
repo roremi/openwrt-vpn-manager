@@ -1035,7 +1035,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             switchTab('dashboard', document.querySelector('.menu-tab'));
             refreshAll();
-            setInterval(() => { loadStatus(); loadDevices(); loadProfiles(); }, 8000);
+            setInterval(() => { loadStatus(); loadProfiles(); loadPolicies(); loadDevices(); }, 8000);
         });
 
     </script>
