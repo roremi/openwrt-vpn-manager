@@ -689,9 +689,36 @@ toggle_profile() {
     echo '{"ok":true}'
 }
 
+normalize_mac() {
+    echo "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+dedupe_device_policies() {
+    keep_section="$1"
+    keep_mac="$(normalize_mac "$2")"
+    keep_ip="$3"
+
+    for sec in $(uci -q show vpn-manager | sed -n 's/^vpn-manager\.\([^.=]*\)=device_policy$/\1/p'); do
+        [ "$sec" = "$keep_section" ] && continue
+
+        sec_mac="$(normalize_mac "$(uci -q get vpn-manager.$sec.mac)")"
+        sec_ip="$(uci -q get vpn-manager.$sec.ip)"
+
+        if [ -n "$keep_mac" ] && [ "$sec_mac" = "$keep_mac" ]; then
+            uci -q delete "vpn-manager.$sec"
+            continue
+        fi
+
+        if [ -n "$keep_ip" ] && [ "$sec_ip" = "$keep_ip" ]; then
+            uci -q delete "vpn-manager.$sec"
+            continue
+        fi
+    done
+}
+
 set_policy() {
     section="$2"
-    mac="$3"
+    mac="$(normalize_mac "$3")"
     ip="$4"
     hostname="$5"
     target="$6"
@@ -711,6 +738,7 @@ set_policy() {
     fi
 
     vm_policy_set_device_target "$section" "$mac" "$ip" "$hostname" "$target"
+    dedupe_device_policies "$section" "$mac" "$ip"
     uci commit vpn-manager
 
     if /usr/libexec/vpn-manager/reconcile.sh >/dev/null 2>&1; then
