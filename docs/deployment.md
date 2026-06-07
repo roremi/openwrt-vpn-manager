@@ -7,10 +7,10 @@
 
 ## Method A: Direct install on router (simplest)
 
-1. Upload repository to /root/vpn-manager.
+1. Upload repository to /root/openwrt-vpn-manager.
 2. Run one command:
 
-sh /root/vpn-manager/scripts/bootstrap-openwrt.sh
+sh /root/openwrt-vpn-manager/scripts/bootstrap-openwrt.sh
 
 What it does:
 - Detects apk or opkg automatically
@@ -24,7 +24,7 @@ What it does:
 
 Run:
 
-sh /root/vpn-manager/scripts/install.sh
+sh /root/openwrt-vpn-manager/scripts/install.sh
 
 ## Method B: Build ipk in OpenWrt SDK
 

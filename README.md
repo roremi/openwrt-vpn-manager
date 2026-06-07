@@ -215,7 +215,8 @@ Then refresh browser (Ctrl+F5).
 
 ```sh
 /etc/init.d/vpn-manager stop || true
-rm -rf /root/openwrt-vpn-manager /etc/vpn-manager
+rm -rf /root/openwrt-vpn-manager
+rm -f /etc/config/vpn-manager
 ```
 
 Then run install steps again.
