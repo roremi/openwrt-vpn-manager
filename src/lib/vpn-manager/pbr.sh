@@ -30,6 +30,10 @@ vm_pbr_validate_profile() {
     return 0
 }
 
+vm_pbr_first_ipv4() {
+    printf '%s\n' "$1" | tr ', ' '\n\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n1
+}
+
 vm_pbr_generate_nft() {
     vm_init_dirs
 
@@ -73,7 +77,7 @@ table inet vpn_manager_strict {
 }
 EOF
 
-    local sec target fwmark mac ip_addr iface
+    local sec target fwmark mac ip_addr iface dns_ip
     local nat_ifaces=""
     for sec in $(uci -q show vpn-manager | sed -n 's/^vpn-manager\.\([^.=]*\)=device_policy$/\1/p'); do
         target="$(uci -q get vpn-manager.$sec.target)"
@@ -88,6 +92,7 @@ EOF
             vm_profile_exists "$target" || continue
             fwmark="$(uci -q get vpn-manager.$target.fwmark)"
             iface="$(uci -q get vpn-manager.$target.iface)"
+            dns_ip="$(vm_pbr_first_ipv4 "$(uci -q get vpn-manager.$target.dns)")"
             [ -n "$iface" ] && nat_ifaces="$nat_ifaces $iface"
 
             # Strict anti-leak: VPN-targeted clients must not egress via non-VPN interfaces.
@@ -95,6 +100,31 @@ EOF
                 [ -n "$mac" ] && echo "add rule inet vpn_manager_strict forward iifname \"br-lan\" ether saddr $mac oifname != \"$iface\" drop" >> "$VM_NFT_STRICT_FILE"
                 if echo "$ip_addr" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
                     echo "add rule inet vpn_manager_strict forward iifname \"br-lan\" ip saddr $ip_addr oifname != \"$iface\" drop" >> "$VM_NFT_STRICT_FILE"
+                fi
+            fi
+
+            # Pin DNS of VPN-routed clients to the profile DNS to avoid dnsmasq WAN upstream leakage.
+            if echo "$dns_ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+                if [ -n "$mac" ]; then
+                    echo "add rule ip vpn_manager_dns prerouting ether saddr $mac udp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
+                    echo "add rule ip vpn_manager_dns prerouting ether saddr $mac tcp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ether saddr $mac ip daddr $dns_ip udp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ether saddr $mac ip daddr $dns_ip tcp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ether saddr $mac udp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ether saddr $mac tcp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ether saddr $mac udp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ether saddr $mac tcp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
+                fi
+
+                if echo "$ip_addr" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+                    echo "add rule ip vpn_manager_dns prerouting ip saddr $ip_addr udp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
+                    echo "add rule ip vpn_manager_dns prerouting ip saddr $ip_addr tcp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $ip_addr ip daddr $dns_ip udp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $ip_addr ip daddr $dns_ip tcp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $ip_addr udp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $ip_addr tcp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $ip_addr udp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
+                    echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $ip_addr tcp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
                 fi
             fi
 
@@ -115,6 +145,7 @@ EOF
         vm_profile_exists "$wifi_target" || continue
 
         iface="$(uci -q get vpn-manager.$wifi_target.iface)"
+        dns_ip="$(vm_pbr_first_ipv4 "$(uci -q get vpn-manager.$wifi_target.dns)")"
         wifi_subnet_id="$(uci -q get vpn-manager.$wifi_sec.subnet_id)"
         wifi_subnet_cidr="$(vm_wifi_binding_subnet_cidr "$wifi_subnet_id")"
 
@@ -124,6 +155,17 @@ EOF
         nat_ifaces="$nat_ifaces $iface"
         echo "add rule inet vpn_manager_strict forward ip saddr $wifi_subnet_cidr oifname != \"$iface\" drop" >> "$VM_NFT_STRICT_FILE"
         echo "add rule inet vpn_manager_strict forward ip saddr $wifi_subnet_cidr oifname \"$iface\" accept" >> "$VM_NFT_STRICT_FILE"
+
+        if echo "$dns_ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "add rule ip vpn_manager_dns prerouting ip saddr $wifi_subnet_cidr udp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
+            echo "add rule ip vpn_manager_dns prerouting ip saddr $wifi_subnet_cidr tcp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
+            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $wifi_subnet_cidr ip daddr $dns_ip udp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
+            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $wifi_subnet_cidr ip daddr $dns_ip tcp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
+            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $wifi_subnet_cidr udp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
+            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $wifi_subnet_cidr tcp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
+            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $wifi_subnet_cidr udp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
+            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $wifi_subnet_cidr tcp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
+        fi
     done
 
     for iface in $nat_ifaces; do
