@@ -227,15 +227,15 @@ vm_policy_set_device_target() {
     uci set "$VM_CFG.$section.enabled=1"
 }
 
-vm_wifi_profile_list() {
-    uci -q show "$VM_CFG" | sed -n 's/^vpn-manager\.\([^.=]*\)=wifi_profile$/\1/p'
+vm_wifi_binding_list() {
+    uci -q show "$VM_CFG" | sed -n 's/^vpn-manager\.\([^.=]*\)=wifi_binding$/\1/p'
 }
 
-vm_wifi_profile_exists() {
+vm_wifi_binding_exists() {
     uci -q get "$VM_CFG.$1" >/dev/null 2>&1
 }
 
-vm_wifi_profile_next_subnet_id() {
+vm_wifi_binding_next_subnet_id() {
     local used id
     used="$(uci -q show "$VM_CFG" | sed -n 's/^vpn-manager\.[^.]*\.subnet_id=\(.*\)$/\1/p' | tr -d "'")"
     id=20
@@ -249,9 +249,29 @@ vm_wifi_profile_next_subnet_id() {
     echo 250
 }
 
-vm_wifi_profile_subnet_cidr() {
+vm_wifi_binding_gateway() {
+    local subnet_id="$1"
+    printf '10.77.%s.1' "$subnet_id"
+}
+
+vm_wifi_binding_subnet_cidr() {
     local subnet_id="$1"
     printf '10.77.%s.0/24' "$subnet_id"
+}
+
+vm_wifi_binding_target_profile() {
+    local target="$1"
+
+    [ -n "$target" ] || return 1
+    vm_profile_exists "$target" && {
+        echo "$target"
+        return 0
+    }
+
+    local mapped_target
+    mapped_target="$(vm_profile_by_iface "$target" 2>/dev/null || true)"
+    [ -n "$mapped_target" ] || return 1
+    echo "$mapped_target"
 }
 
 vm_commit_all() {

@@ -252,11 +252,11 @@ route_status() {
     printf ']}'
 }
 
-vm_wifi_profile_pick_radio() {
+vm_wifi_binding_pick_radio() {
     uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-device$/\1/p' | head -n1
 }
 
-vm_wifi_profile_radio_for_default_iface() {
+vm_wifi_binding_radio_for_default_iface() {
     uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p' | head -n1 | while read -r iface; do
         [ -n "$iface" ] || continue
         uci -q get wireless."$iface".device
@@ -264,37 +264,15 @@ vm_wifi_profile_radio_for_default_iface() {
     done
 }
 
-vm_wifi_profile_target_profile() {
-    local target="$1"
-
-    [ -n "$target" ] || { echo ""; return 1; }
-    [ "$target" = "wan" ] && { echo "wan"; return 0; }
-
-    if vm_profile_exists "$target"; then
-        echo "$target"
-        return 0
-    fi
-
-    mapped_target="$(vm_profile_by_iface "$target" 2>/dev/null || true)"
-    [ -n "$mapped_target" ] || return 1
-    echo "$mapped_target"
+vm_first_ipv4() {
+    printf '%s\n' "$1" | tr ', ' '\n\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n1
 }
 
-vm_wifi_profile_gateway() {
-    local subnet_id="$1"
-    printf '10.77.%s.1' "$subnet_id"
-}
-
-vm_wifi_profile_subnet() {
-    local subnet_id="$1"
-    printf '10.77.%s.0/24' "$subnet_id"
-}
-
-list_wifi_profiles() {
-    printf '{"ok":true,"profiles":['
+list_wifi_bindings() {
+    printf '{"ok":true,"bindings":['
     first=1
 
-    for sec in $(vm_wifi_profile_list); do
+    for sec in $(vm_wifi_binding_list); do
         [ $first -eq 1 ] || printf ','
         first=0
 
@@ -306,19 +284,22 @@ list_wifi_profiles() {
         subnet_id="$(uci -q get vpn-manager.$sec.subnet_id)"
         network_name="$(uci -q get vpn-manager.$sec.network)"
         radio="$(uci -q get wireless.$sec.device)"
-        status="wan"
+        gateway="$(uci -q get network.$network_name.ipaddr)"
+        dns_ip=""
         target_iface=""
+        status="unknown"
 
         [ -n "$network_name" ] || network_name="$sec"
-        [ -n "$radio" ] || radio="$(vm_wifi_profile_radio_for_default_iface)"
-        [ -n "$subnet_id" ] || subnet_id="0"
+        [ -n "$gateway" ] || gateway="$(vm_wifi_binding_gateway "$subnet_id")"
+        [ -n "$radio" ] || radio="$(vm_wifi_binding_radio_for_default_iface)"
 
-        if [ "$target" != "wan" ] && vm_profile_exists "$target"; then
+        if vm_profile_exists "$target"; then
             target_iface="$(uci -q get vpn-manager.$target.iface)"
+            dns_ip="$(vm_first_ipv4 "$(uci -q get vpn-manager.$target.dns)")"
             status="$(vm_profile_health "$target_iface" "180" || true)"
         fi
 
-        printf '{"id":"%s","ssid":"%s","key":"%s","encryption":"%s","target":"%s","target_iface":"%s","enabled":"%s","subnet_id":"%s","subnet":"%s","network":"%s","radio":"%s","status":"%s"}' \
+        printf '{"id":"%s","ssid":"%s","key":"%s","encryption":"%s","target":"%s","target_iface":"%s","enabled":"%s","subnet_id":"%s","subnet":"%s","network":"%s","gateway":"%s","dns":"%s","radio":"%s","status":"%s"}' \
             "$sec" \
             "$(json_escape "$ssid")" \
             "$(json_escape "$key")" \
@@ -327,8 +308,10 @@ list_wifi_profiles() {
             "$(json_escape "$target_iface")" \
             "$enabled" \
             "$subnet_id" \
-            "$(vm_wifi_profile_subnet "$subnet_id")" \
+            "$(vm_wifi_binding_subnet_cidr "$subnet_id")" \
             "$(json_escape "$network_name")" \
+            "$(json_escape "$gateway")" \
+            "$(json_escape "$dns_ip")" \
             "$(json_escape "$radio")" \
             "$(json_escape "$status")"
     done
@@ -336,7 +319,7 @@ list_wifi_profiles() {
     printf ']}'
 }
 
-save_wifi_profile() {
+save_wifi_binding() {
     sec="$2"
     ssid="$3"
     key="$4"
@@ -349,30 +332,36 @@ save_wifi_profile() {
         return
     }
 
-    target="$(vm_wifi_profile_target_profile "$target" 2>/dev/null || true)"
+    target="$(vm_wifi_binding_target_profile "$target" 2>/dev/null || true)"
     [ -n "$target" ] || {
         echo '{"ok":false,"error":"target profile not found"}'
         return
     }
 
     [ -n "$sec" ] || sec="wifi_$(echo "$ssid" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//' | cut -c1-20)_$(date +%H%M%S)"
-    radio="$(vm_wifi_profile_radio_for_default_iface)"
-    [ -n "$radio" ] || radio="$(vm_wifi_profile_pick_radio)"
+
+    radio="$(vm_wifi_binding_radio_for_default_iface)"
+    [ -n "$radio" ] || radio="$(vm_wifi_binding_pick_radio)"
     [ -n "$radio" ] || {
         echo '{"ok":false,"error":"wifi radio not found"}'
         return
     }
 
-    if vm_wifi_profile_exists "$sec"; then
+    if vm_wifi_binding_exists "$sec"; then
         subnet_id="$(uci -q get vpn-manager.$sec.subnet_id)"
+        network_name="$(uci -q get vpn-manager.$sec.network)"
     else
-        subnet_id="$(vm_wifi_profile_next_subnet_id)"
-        uci set "vpn-manager.$sec=wifi_profile"
+        subnet_id="$(vm_wifi_binding_next_subnet_id)"
+        network_name="$sec"
+        uci set "vpn-manager.$sec=wifi_binding"
     fi
 
-    [ -n "$subnet_id" ] || subnet_id="$(vm_wifi_profile_next_subnet_id)"
-    network_name="$sec"
-    gateway="$(vm_wifi_profile_gateway "$subnet_id")"
+    [ -n "$subnet_id" ] || subnet_id="$(vm_wifi_binding_next_subnet_id)"
+    [ -n "$network_name" ] || network_name="$sec"
+
+    gateway="$(vm_wifi_binding_gateway "$subnet_id")"
+    dns_ip="$(vm_first_ipv4 "$(uci -q get vpn-manager.$target.dns)")"
+    [ -n "$dns_ip" ] || dns_ip="$gateway"
 
     uci set "vpn-manager.$sec.enabled=${enabled:-1}"
     uci set "vpn-manager.$sec.ssid=$ssid"
@@ -425,6 +414,8 @@ save_wifi_profile() {
     uci set "dhcp.$network_name.dhcpv6=disabled"
     uci set "dhcp.$network_name.ra=disabled"
     uci set "dhcp.$network_name.ndp=disabled"
+    uci add_list "dhcp.$network_name.dhcp_option=3,$gateway"
+    uci add_list "dhcp.$network_name.dhcp_option=6,$dns_ip"
 
     uci -q delete "firewall.$network_name"
     uci set "firewall.$network_name=zone"
@@ -448,24 +439,27 @@ save_wifi_profile() {
     echo '{"ok":true}'
 }
 
-delete_wifi_profile() {
+delete_wifi_binding() {
     sec="$2"
     [ -n "$sec" ] || {
         echo '{"ok":false,"error":"missing section"}'
         return
     }
 
-    vm_wifi_profile_exists "$sec" || {
-        echo '{"ok":false,"error":"wifi profile not found"}'
+    vm_wifi_binding_exists "$sec" || {
+        echo '{"ok":false,"error":"wifi binding not found"}'
         return
     }
 
+    network_name="$(uci -q get vpn-manager.$sec.network)"
+    [ -n "$network_name" ] || network_name="$sec"
+
     uci -q delete "vpn-manager.$sec"
     uci -q delete "wireless.$sec"
-    uci -q delete "network.$sec"
-    uci -q delete "network.${sec}_dev"
-    uci -q delete "dhcp.$sec"
-    uci -q delete "firewall.$sec"
+    uci -q delete "network.$network_name"
+    uci -q delete "network.${network_name}_dev"
+    uci -q delete "dhcp.$network_name"
+    uci -q delete "firewall.$network_name"
 
     uci commit vpn-manager
     uci commit wireless
@@ -1037,9 +1031,9 @@ case "$1" in
     import_profile) import_profile "$@" ;;
     list_wifi) list_wifi ;;
     set_wifi) set_wifi "$@" ;;
-    list_wifi_profiles) list_wifi_profiles ;;
-    save_wifi_profile) save_wifi_profile "$@" ;;
-    delete_wifi_profile) delete_wifi_profile "$@" ;;
+    list_wifi_bindings) list_wifi_bindings ;;
+    save_wifi_binding) save_wifi_binding "$@" ;;
+    delete_wifi_binding) delete_wifi_binding "$@" ;;
     route_status) route_status ;;
     list_multiebay_settings) list_multiebay_settings ;;
     save_multiebay_settings) save_multiebay_settings "$@" ;;

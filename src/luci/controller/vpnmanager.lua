@@ -20,9 +20,9 @@ function index()
     entry({"admin", "services", "vpnmanager", "import"}, call("rpc_import")).leaf = true
     entry({"admin", "services", "vpnmanager", "wifi"}, call("rpc_wifi")).leaf = true
     entry({"admin", "services", "vpnmanager", "wifi_set"}, call("rpc_wifi_set")).leaf = true
-    entry({"admin", "services", "vpnmanager", "wifi_profiles"}, call("rpc_wifi_profiles")).leaf = true
-    entry({"admin", "services", "vpnmanager", "wifi_profile"}, call("rpc_wifi_profile")).leaf = true
-    entry({"admin", "services", "vpnmanager", "wifi_profile_delete"}, call("rpc_wifi_profile_delete")).leaf = true
+    entry({"admin", "services", "vpnmanager", "wifi_bindings"}, call("rpc_wifi_bindings")).leaf = true
+    entry({"admin", "services", "vpnmanager", "wifi_binding"}, call("rpc_wifi_binding")).leaf = true
+    entry({"admin", "services", "vpnmanager", "wifi_binding_delete"}, call("rpc_wifi_binding_delete")).leaf = true
     entry({"admin", "services", "vpnmanager", "route_status"}, call("rpc_route_status")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings"}, call("rpc_multiebay_settings")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings_save"}, call("rpc_multiebay_settings_save")).leaf = true
@@ -182,20 +182,20 @@ function rpc_wifi_set()
     )
 end
 
-function rpc_wifi_profiles()
-    run_rpc("list_wifi_profiles")
+function rpc_wifi_bindings()
+    run_rpc("list_wifi_bindings")
 end
 
-function rpc_wifi_profile()
+function rpc_wifi_binding()
     local id = luci.http.formvalue("id") or ""
     local ssid = luci.http.formvalue("ssid") or ""
     local key = luci.http.formvalue("key") or ""
     local encryption = luci.http.formvalue("encryption") or "sae-mixed"
-    local target = luci.http.formvalue("target") or "wan"
+    local target = luci.http.formvalue("target") or ""
     local enabled = luci.http.formvalue("enabled") or "1"
 
     run_rpc(
-        "save_wifi_profile " ..
+        "save_wifi_binding " ..
         sq(id) .. " " ..
         sq(ssid) .. " " ..
         sq(key) .. " " ..
@@ -205,9 +205,9 @@ function rpc_wifi_profile()
     )
 end
 
-function rpc_wifi_profile_delete()
+function rpc_wifi_binding_delete()
     local id = luci.http.formvalue("id") or ""
-    run_rpc("delete_wifi_profile " .. sq(id))
+    run_rpc("delete_wifi_binding " .. sq(id))
 end
 
 function rpc_route_status()

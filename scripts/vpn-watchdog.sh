@@ -13,6 +13,8 @@ next_state_file="/tmp/vpn-manager/profile-states.next"
 rm -f "$next_state_file"
 touch "$next_state_file"
 
+needs_refresh=0
+
 for sec in $(vm_profile_list); do
     [ "$(uci -q get vpn-manager.$sec.enabled)" = "1" ] || continue
     iface="$(uci -q get vpn-manager.$sec.iface)"
@@ -31,7 +33,24 @@ for sec in $(vm_profile_list); do
     fi
 done
 
-if [ ! -f "$state_file" ] || ! cmp -s "$state_file" "$next_state_file"; then
+for wifi_sec in $(vm_wifi_binding_list); do
+    [ "$(uci -q get vpn-manager.$wifi_sec.enabled)" = "1" ] || continue
+
+    wifi_target="$(uci -q get vpn-manager.$wifi_sec.target)"
+    vm_profile_exists "$wifi_target" || continue
+
+    wifi_iface="$(uci -q get vpn-manager.$wifi_target.iface)"
+    wifi_network="$(uci -q get vpn-manager.$wifi_sec.network)"
+    [ -n "$wifi_network" ] || wifi_network="$wifi_sec"
+
+    if [ -n "$wifi_iface" ]; then
+        if ! nft list chain inet fw4 "forward_${wifi_network}" 2>/dev/null | grep -Fq "oifname \"$wifi_iface\""; then
+            needs_refresh=1
+        fi
+    fi
+done
+
+if [ "$needs_refresh" = "1" ] || [ ! -f "$state_file" ] || ! cmp -s "$state_file" "$next_state_file"; then
     vm_log "info" "profile health state changed, refreshing pbr rules"
     vm_pbr_generate_nft && vm_pbr_apply_rules || vm_log "warn" "pbr refresh failed after health change"
 fi

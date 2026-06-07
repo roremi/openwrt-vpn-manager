@@ -385,19 +385,19 @@
                 </div>
 
                 <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mt-6">
-                    <h3 class="text-lg font-bold text-gray-700 mb-4">WiFi VPN Profiles</h3>
-                    <p class="text-sm text-gray-500 mb-4">Tạo SSID riêng và gán một VPN cho toàn bộ thiết bị vào SSID đó. Các rule gán VPN theo thiết bị hiện tại vẫn giữ nguyên.</p>
+                    <h3 class="text-lg font-bold text-gray-700 mb-2">Dedicated WiFi Over VPN</h3>
+                    <p class="text-sm text-gray-500 mb-4">Tạo một SSID riêng có subnet riêng, rồi ép toàn bộ thiết bị trong SSID đó đi qua đúng một VPN profile. Các rule theo thiết bị hiện có vẫn giữ nguyên và không bị sửa.</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Profile ID</label><input id="wifi-profile-id" type="text" placeholder="wifi_shop_us" class="form-control"></div>
-                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">SSID</label><input id="wifi-profile-ssid" type="text" placeholder="Shop-US" class="form-control"></div>
-                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Password</label><input id="wifi-profile-key" type="text" class="form-control"></div>
-                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Security</label><select id="wifi-profile-encryption" class="form-control"><option value="sae-mixed">WPA2/WPA3 Mixed</option><option value="psk2">WPA2-PSK</option><option value="sae">WPA3-SAE</option><option value="none">Open</option></select></div>
-                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Target VPN</label><select id="wifi-profile-target" class="form-control" data-target-for="wifi-profile"></select></div>
-                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Enabled</label><select id="wifi-profile-enabled" class="form-control"><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Binding ID</label><input id="wifi-binding-id" type="text" placeholder="wifi_shop_us" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">SSID</label><input id="wifi-binding-ssid" type="text" placeholder="Shop-US" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Password</label><input id="wifi-binding-key" type="text" class="form-control"></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Security</label><select id="wifi-binding-encryption" class="form-control"><option value="sae-mixed">WPA2/WPA3 Mixed</option><option value="psk2">WPA2-PSK</option><option value="sae">WPA3-SAE</option><option value="none">Open</option></select></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Target VPN</label><select id="wifi-binding-target" class="form-control" data-target-for="wifi-binding"></select></div>
+                        <div><label class="block text-xs font-semibold text-gray-500 mb-1">Enabled</label><select id="wifi-binding-enabled" class="form-control"><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
                     </div>
                     <div class="flex space-x-3 mb-5">
-                        <button class="btn-primary" onclick="saveWifiProfile()">Save WiFi VPN</button>
-                        <button class="btn-secondary" onclick="clearWifiProfileForm()">Clear</button>
+                        <button class="btn-primary" onclick="saveWifiBinding()">Save Dedicated WiFi</button>
+                        <button class="btn-secondary" onclick="clearWifiBindingForm()">Clear</button>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left text-sm whitespace-nowrap">
@@ -412,10 +412,11 @@
                                     <th class="px-6 py-4 text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody id="wifi-profiles-body" class="divide-y divide-gray-100"></tbody>
+                            <tbody id="wifi-bindings-body" class="divide-y divide-gray-100"></tbody>
                         </table>
                     </div>
                 </div>
+
             </div>
 
             <!-- Policies Tab -->
@@ -485,7 +486,8 @@
         let profileMap = {};
         let cachedDevices = [];
         let cachedPolicies = [];
-        let cachedWifiProfiles = [];
+        let wifiBindingTargets = [];
+        let cachedWifiBindings = [];
         let cachedRouteStatus = { wan: null, profiles: [] };
         let multiebaySettings = { api_base: 'https://multiebay.com', api_key_saved: false, api_key: '', allow_http_proxy: '1' };
 
@@ -570,16 +572,21 @@
         function healthBadge(st) { return '<span class="badge ' + h(st || 'unknown') + '">' + h(st || 'unk') + '</span>'; }
 
         function renderTargetOptions() {
-            document.querySelectorAll('select[data-target-for], #policy-target').forEach(sel => {
-                const keep = sel.value || 'wan';
+            document.querySelectorAll('select[data-target-for]').forEach(sel => {
+                const optionSet = sel.dataset.targetFor === 'wifi-binding' ? wifiBindingTargets : profileTargets;
+                const keep = sel.value || (optionSet[0] ? optionSet[0].value : '');
                 sel.innerHTML = '';
-                profileTargets.forEach(target => {
+                optionSet.forEach(target => {
                     const opt = document.createElement('option');
                     opt.value = target.value;
                     opt.textContent = target.label;
                     sel.appendChild(opt);
                 });
-                sel.value = profileTargets.some(t => t.value === keep) ? keep : 'wan';
+                if (optionSet.some(t => t.value === keep)) {
+                    sel.value = keep;
+                } else if (optionSet[0]) {
+                    sel.value = optionSet[0].value;
+                }
             });
         }
 
@@ -633,25 +640,25 @@
             }).catch(e => showToast(e.message, false));
         }
 
-        function loadWifiProfiles() {
-            return apiGet('/wifi_profiles').then(res => {
-                if (res.ok === false) throw new Error(res.error || 'Unable to load WiFi VPN profiles');
-                cachedWifiProfiles = res.profiles || [];
-                renderWifiProfiles();
+        function loadWifiBindings() {
+            return apiGet('/wifi_bindings').then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to load dedicated WiFi bindings');
+                cachedWifiBindings = res.bindings || [];
+                renderWifiBindings();
             }).catch(e => {
-                const tb = document.getElementById('wifi-profiles-body');
+                const tb = document.getElementById('wifi-bindings-body');
                 if (tb) {
-                    tb.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-sm text-red-500">' + h(e.message || 'Unable to load WiFi VPN profiles') + '</td></tr>';
+                    tb.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-sm text-red-500">' + h(e.message || 'Unable to load dedicated WiFi bindings') + '</td></tr>';
                 }
             });
         }
 
-        function renderWifiProfiles() {
-            const tb = document.getElementById('wifi-profiles-body');
+        function renderWifiBindings() {
+            const tb = document.getElementById('wifi-bindings-body');
             if (!tb) return;
             tb.innerHTML = '';
 
-            cachedWifiProfiles.forEach(item => {
+            cachedWifiBindings.forEach(item => {
                 const routeObj = routeStatusForTarget(item.target);
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-gray-50';
@@ -660,62 +667,67 @@
                     <td class="px-6 py-4 text-gray-600">${h(item.network)}</td>
                     <td class="px-6 py-4 text-gray-600">${h(item.subnet)}</td>
                     <td class="px-6 py-4">${statusBadge(item.target || 'wan')}</td>
-                    <td class="px-6 py-4">${healthBadge(item.status || (item.target === 'wan' ? 'healthy' : 'unknown'))}</td>
+                    <td class="px-6 py-4">${healthBadge(item.status || 'unknown')}</td>
                     <td class="px-6 py-4">${renderExitIpCell(routeObj)}</td>
                     <td class="px-6 py-4 text-right space-x-2">
-                        <button class="btn-secondary btn-tiny" onclick="editWifiProfile('${h(item.id)}')">Edit</button>
-                        <button class="btn-danger btn-tiny" onclick="deleteWifiProfile('${h(item.id)}')">Delete</button>
+                        <button class="btn-secondary btn-tiny" onclick="editWifiBinding('${h(item.id)}')">Edit</button>
+                        <button class="btn-danger btn-tiny" onclick="deleteWifiBinding('${h(item.id)}')">Delete</button>
                     </td>`;
                 tb.appendChild(tr);
             });
 
-            if (!cachedWifiProfiles.length) {
-                tb.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-sm text-gray-400">No WiFi VPN profiles yet.</td></tr>';
+            if (!cachedWifiBindings.length) {
+                tb.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-sm text-gray-400">No dedicated WiFi bindings yet.</td></tr>';
             }
         }
 
-        function clearWifiProfileForm() {
-            document.getElementById('wifi-profile-id').value = '';
-            document.getElementById('wifi-profile-ssid').value = '';
-            document.getElementById('wifi-profile-key').value = '';
-            document.getElementById('wifi-profile-encryption').value = 'sae-mixed';
-            document.getElementById('wifi-profile-target').value = 'wan';
-            document.getElementById('wifi-profile-enabled').value = '1';
+        function clearWifiBindingForm() {
+            document.getElementById('wifi-binding-id').value = '';
+            document.getElementById('wifi-binding-ssid').value = '';
+            document.getElementById('wifi-binding-key').value = '';
+            document.getElementById('wifi-binding-encryption').value = 'sae-mixed';
+            if (wifiBindingTargets[0]) {
+                document.getElementById('wifi-binding-target').value = wifiBindingTargets[0].value;
+            }
+            document.getElementById('wifi-binding-enabled').value = '1';
         }
 
-        function editWifiProfile(id) {
-            const item = cachedWifiProfiles.find(entry => entry.id === id);
+        function editWifiBinding(id) {
+            const item = cachedWifiBindings.find(entry => entry.id === id);
             if (!item) return;
-            document.getElementById('wifi-profile-id').value = item.id || '';
-            document.getElementById('wifi-profile-ssid').value = item.ssid || '';
-            document.getElementById('wifi-profile-key').value = item.key || '';
-            document.getElementById('wifi-profile-encryption').value = item.encryption || 'sae-mixed';
-            document.getElementById('wifi-profile-target').value = item.target || 'wan';
-            document.getElementById('wifi-profile-enabled').value = item.enabled === '0' ? '0' : '1';
+            document.getElementById('wifi-binding-id').value = item.id || '';
+            document.getElementById('wifi-binding-ssid').value = item.ssid || '';
+            document.getElementById('wifi-binding-key').value = item.key || '';
+            document.getElementById('wifi-binding-encryption').value = item.encryption || 'sae-mixed';
+            document.getElementById('wifi-binding-target').value = item.target || '';
+            document.getElementById('wifi-binding-enabled').value = item.enabled === '0' ? '0' : '1';
         }
 
-        function saveWifiProfile() {
-            apiPost('/wifi_profile', {
-                id: document.getElementById('wifi-profile-id').value.trim(),
-                ssid: document.getElementById('wifi-profile-ssid').value.trim(),
-                key: document.getElementById('wifi-profile-key').value,
-                encryption: document.getElementById('wifi-profile-encryption').value,
-                target: document.getElementById('wifi-profile-target').value,
-                enabled: document.getElementById('wifi-profile-enabled').value
+        function saveWifiBinding() {
+            const target = document.getElementById('wifi-binding-target').value;
+            if (!target) return showToast('Target VPN required', false);
+
+            apiPost('/wifi_binding', {
+                id: document.getElementById('wifi-binding-id').value.trim(),
+                ssid: document.getElementById('wifi-binding-ssid').value.trim(),
+                key: document.getElementById('wifi-binding-key').value,
+                encryption: document.getElementById('wifi-binding-encryption').value,
+                target: target,
+                enabled: document.getElementById('wifi-binding-enabled').value
             }).then(res => {
-                if (res.ok === false) throw new Error(res.error || 'Unable to save WiFi VPN profile');
-                clearWifiProfileForm();
+                if (res.ok === false) throw new Error(res.error || 'Unable to save dedicated WiFi');
+                clearWifiBindingForm();
                 return applyIfNeeded();
-            }).then(() => refreshAll()).then(() => showToast('WiFi VPN profile saved', true))
+            }).then(() => refreshAll()).then(() => showToast('Dedicated WiFi saved', true))
             .catch(e => showToast(e.message, false));
         }
 
-        function deleteWifiProfile(id) {
-            if (!confirm('Delete WiFi VPN profile: ' + id + '?')) return;
-            apiPost('/wifi_profile_delete', { id: id }).then(res => {
-                if (res.ok === false) throw new Error(res.error || 'Unable to delete WiFi VPN profile');
+        function deleteWifiBinding(id) {
+            if (!confirm('Delete dedicated WiFi binding: ' + id + '?')) return;
+            apiPost('/wifi_binding_delete', { id: id }).then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to delete dedicated WiFi');
                 return applyIfNeeded();
-            }).then(() => refreshAll()).then(() => showToast('WiFi VPN profile deleted', true))
+            }).then(() => refreshAll()).then(() => showToast('Dedicated WiFi deleted', true))
             .catch(e => showToast(e.message, false));
         }
 
@@ -808,6 +820,10 @@
                     value: p.id,
                     label: (p.name || p.id) + ' [' + p.id + ']'
                 })));
+                wifiBindingTargets = profiles.map(p => ({
+                    value: p.id,
+                    label: (p.name || p.id) + ' [' + p.id + ']'
+                }));
                 renderTargetOptions();
 
                 const tb = document.getElementById('profiles-table-body');
@@ -1026,7 +1042,7 @@
                 .then(loadPolicies)
                 .then(loadDevices)
                 .then(() => loadWifiSettings(true))
-                .then(loadWifiProfiles)
+                .then(loadWifiBindings)
                 .then(loadMultiEbaySettings)
                 .catch(() => showToast('Refresh cycle failed', false));
         }

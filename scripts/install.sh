@@ -31,6 +31,11 @@ if [ ! -f /etc/config/vpn-manager ]; then
     install -m 0644 "$BASE_DIR/etc/config/vpn-manager" /etc/config/vpn-manager
 fi
 
+if uci -q get dhcp.@dnsmasq[0].filter_aaaa >/dev/null 2>&1; then
+    uci set dhcp.@dnsmasq[0].filter_aaaa='1'
+    uci commit dhcp
+fi
+
 /etc/init.d/rpcd restart
 /etc/init.d/uhttpd restart
 

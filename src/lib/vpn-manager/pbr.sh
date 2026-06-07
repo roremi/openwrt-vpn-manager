@@ -73,7 +73,7 @@ table inet vpn_manager_strict {
 }
 EOF
 
-    local sec target fwmark mac ip_addr iface dns_ip subnet_ip subnet_cidr
+    local sec target fwmark mac ip_addr iface
     local nat_ifaces=""
     for sec in $(uci -q show vpn-manager | sed -n 's/^vpn-manager\.\([^.=]*\)=device_policy$/\1/p'); do
         target="$(uci -q get vpn-manager.$sec.target)"
@@ -98,40 +98,6 @@ EOF
                 fi
             fi
 
-            # Prevent DNS leak: force this device's DNS queries through the VPN profile DNS.
-            dns_ip="$(uci -q get vpn-manager.$target.dns | awk '{print $1}')"
-            if echo "$dns_ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-                if [ -n "$mac" ]; then
-                    echo "add rule ip vpn_manager_dns prerouting iifname \"br-lan\" ether saddr $mac udp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
-                    echo "add rule ip vpn_manager_dns prerouting iifname \"br-lan\" ether saddr $mac tcp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
-                fi
-                if echo "$ip_addr" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-                    echo "add rule ip vpn_manager_dns prerouting iifname \"br-lan\" ip saddr $ip_addr udp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
-                    echo "add rule ip vpn_manager_dns prerouting iifname \"br-lan\" ip saddr $ip_addr tcp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
-                fi
-
-                # Allow DNS only to the profile DNS IP after DNAT, then block other DNS paths.
-                if [ -n "$mac" ]; then
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ether saddr $mac ip daddr $dns_ip udp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ether saddr $mac ip daddr $dns_ip tcp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ether saddr $mac udp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ether saddr $mac tcp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ether saddr $mac udp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ether saddr $mac tcp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ether saddr $mac ip6 nexthdr udp udp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ether saddr $mac ip6 nexthdr tcp tcp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ether saddr $mac ip6 nexthdr udp udp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ether saddr $mac ip6 nexthdr tcp tcp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                fi
-                if echo "$ip_addr" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ip saddr $ip_addr ip daddr $dns_ip udp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ip saddr $ip_addr ip daddr $dns_ip tcp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ip saddr $ip_addr udp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ip saddr $ip_addr tcp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ip saddr $ip_addr udp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                    echo "add rule inet vpn_manager_dns_guard prerouting iifname \"br-lan\" ip saddr $ip_addr tcp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-                fi
-            fi
         fi
 
         [ -n "$fwmark" ] || continue
@@ -141,41 +107,23 @@ EOF
         fi
     done
 
-    for sec in $(uci -q show vpn-manager | sed -n 's/^vpn-manager\.\([^.=]*\)=wifi_profile$/\1/p'); do
-        target="$(uci -q get vpn-manager.$sec.target)"
-        enabled="$(uci -q get vpn-manager.$sec.enabled)"
-        subnet_ip="$(uci -q get network.$sec.ipaddr)"
+    local wifi_sec wifi_target wifi_subnet_id wifi_subnet_cidr
+    for wifi_sec in $(vm_wifi_binding_list); do
+        [ "$(uci -q get vpn-manager.$wifi_sec.enabled)" = "1" ] || continue
 
-        [ "$enabled" = "1" ] || continue
-        [ -n "$subnet_ip" ] || continue
-        subnet_cidr="${subnet_ip%.*}.0/24"
+        wifi_target="$(uci -q get vpn-manager.$wifi_sec.target)"
+        vm_profile_exists "$wifi_target" || continue
 
-        if [ "$target" = "wan" ]; then
-            continue
-        fi
-
-        vm_profile_exists "$target" || continue
-        fwmark="$(uci -q get vpn-manager.$target.fwmark)"
-        iface="$(uci -q get vpn-manager.$target.iface)"
-        dns_ip="$(uci -q get vpn-manager.$target.dns | awk '{print $1}')"
+        iface="$(uci -q get vpn-manager.$wifi_target.iface)"
+        wifi_subnet_id="$(uci -q get vpn-manager.$wifi_sec.subnet_id)"
+        wifi_subnet_cidr="$(vm_wifi_binding_subnet_cidr "$wifi_subnet_id")"
 
         [ -n "$iface" ] || continue
-        [ -n "$fwmark" ] || continue
+        [ -n "$wifi_subnet_id" ] || continue
+
         nat_ifaces="$nat_ifaces $iface"
-
-        if [ -n "$dns_ip" ] && echo "$dns_ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "add rule ip vpn_manager_dns prerouting ip saddr $subnet_cidr udp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
-            echo "add rule ip vpn_manager_dns prerouting ip saddr $subnet_cidr tcp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
-            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $subnet_cidr ip daddr $dns_ip udp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
-            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $subnet_cidr ip daddr $dns_ip tcp dport 53 accept" >> "$VM_NFT_DNS_GUARD_FILE"
-            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $subnet_cidr udp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $subnet_cidr tcp dport 53 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $subnet_cidr udp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-            echo "add rule inet vpn_manager_dns_guard prerouting ip saddr $subnet_cidr tcp dport 853 drop" >> "$VM_NFT_DNS_GUARD_FILE"
-        fi
-
-        echo "add rule inet vpn_manager_strict forward ip saddr $subnet_cidr oifname != \"$iface\" drop" >> "$VM_NFT_STRICT_FILE"
-        echo "add rule inet vpn_manager_strict forward ip saddr $subnet_cidr oifname \"$iface\" accept" >> "$VM_NFT_STRICT_FILE"
+        echo "add rule inet vpn_manager_strict forward ip saddr $wifi_subnet_cidr oifname != \"$iface\" drop" >> "$VM_NFT_STRICT_FILE"
+        echo "add rule inet vpn_manager_strict forward ip saddr $wifi_subnet_cidr oifname \"$iface\" accept" >> "$VM_NFT_STRICT_FILE"
     done
 
     for iface in $nat_ifaces; do
@@ -232,28 +180,30 @@ vm_pbr_apply_rules() {
         echo "$src_prefix $src_table" >> "$VM_SRC_RULES_FILE"
     done
 
-    local wifi_sec wifi_target wifi_subnet wifi_table
-    for wifi_sec in $(uci -q show vpn-manager | sed -n 's/^vpn-manager\.\([^.=]*\)=wifi_profile$/\1/p'); do
+    for wifi_sec in $(vm_wifi_binding_list); do
+        [ "$(uci -q get vpn-manager.$wifi_sec.enabled)" = "1" ] || continue
+
         wifi_target="$(uci -q get vpn-manager.$wifi_sec.target)"
-        [ "$wifi_target" = "wan" ] && continue
         vm_profile_exists "$wifi_target" || continue
 
-        wifi_subnet="$(uci -q get network.$wifi_sec.ipaddr)"
-        echo "$wifi_subnet" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || continue
+        wifi_subnet_id="$(uci -q get vpn-manager.$wifi_sec.subnet_id)"
+        wifi_subnet_cidr="$(vm_wifi_binding_subnet_cidr "$wifi_subnet_id")"
         wifi_table="$(uci -q get vpn-manager.$wifi_target.table_id)"
+
+        [ -n "$wifi_subnet_id" ] || continue
         [ -n "$wifi_table" ] || continue
 
-        wifi_subnet="${wifi_subnet%.*}.0/24"
-        ip -4 rule add from "$wifi_subnet" table "$wifi_table" priority 9990 2>/dev/null || true
-        echo "$wifi_subnet $wifi_table" >> "$VM_SRC_RULES_FILE"
+        ip -4 rule add from "$wifi_subnet_cidr" table "$wifi_table" priority 9990 2>/dev/null || true
+        echo "$wifi_subnet_cidr $wifi_table" >> "$VM_SRC_RULES_FILE"
     done
 
-    local sec table fwmark iface
+    local sec table fwmark iface dns_ip
     for sec in $(vm_profile_list); do
         [ "$(uci -q get vpn-manager.$sec.enabled)" = "1" ] || continue
         table="$(uci -q get vpn-manager.$sec.table_id)"
         fwmark="$(uci -q get vpn-manager.$sec.fwmark)"
         iface="$(uci -q get vpn-manager.$sec.iface)"
+        dns_ip="$(uci -q get vpn-manager.$sec.dns | awk '{print $1}')"
 
         ip link show dev "$iface" >/dev/null 2>&1 || {
             vm_log "warn" "skip pbr for $sec: iface $iface not found"
@@ -269,6 +219,11 @@ vm_pbr_apply_rules() {
         ip -4 route replace default dev "$iface" scope link table "$table" 2>/dev/null || true
         ip -6 route replace default dev "$iface" table "$table" 2>/dev/null || true
 
+        # Keep the router's own DNS lookups for this profile on the tunnel.
+        if echo "$dns_ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+            ip -4 route replace "$dns_ip/32" dev "$iface" scope link 2>/dev/null || true
+        fi
+
         # Allow only LAN <-> VPN-forwarded traffic for this interface.
         if nft list chain inet fw4 forward 2>/dev/null | grep -Fq "iifname \"br-lan\" oifname \"$iface\""; then
             :
@@ -282,9 +237,10 @@ vm_pbr_apply_rules() {
             nft insert rule inet fw4 forward iifname "$iface" oifname "br-lan" ct state established,related counter accept 2>/dev/null || true
         fi
 
-        local wifi_sec wifi_network wifi_chain
-        for wifi_sec in $(uci -q show vpn-manager | sed -n 's/^vpn-manager\.\([^.=]*\)=wifi_profile$/\1/p'); do
+        for wifi_sec in $(vm_wifi_binding_list); do
+            [ "$(uci -q get vpn-manager.$wifi_sec.enabled)" = "1" ] || continue
             [ "$(uci -q get vpn-manager.$wifi_sec.target)" = "$sec" ] || continue
+
             wifi_network="$(uci -q get vpn-manager.$wifi_sec.network)"
             [ -n "$wifi_network" ] || wifi_network="$wifi_sec"
             wifi_chain="forward_${wifi_network}"
@@ -301,6 +257,7 @@ vm_pbr_apply_rules() {
                 nft insert rule inet fw4 forward iifname "$iface" oifname "br-$wifi_network" ct state established,related counter accept 2>/dev/null || true
             fi
         done
+
     done
 
     # Clear route cache so new source rules and marks take effect immediately.
