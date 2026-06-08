@@ -27,6 +27,25 @@ install -m 0644 "$BASE_DIR/src/www/vpnmanager-dashboard.html" /www/vpnmanager-da
 
 install -m 0755 "$BASE_DIR/src/init.d/vpn-manager" /etc/init.d/vpn-manager
 
+# Normalize CRLF line endings from Windows checkouts so ash can execute scripts reliably.
+for f in \
+    /usr/libexec/rpcd/vpn-manager \
+    /usr/libexec/vpn-manager/common.sh \
+    /usr/libexec/vpn-manager/uci.sh \
+    /usr/libexec/vpn-manager/pbr.sh \
+    /usr/libexec/vpn-manager/health.sh \
+    /usr/libexec/vpn-manager/reconcile.sh \
+    /usr/libexec/vpn-manager/watchdog.sh \
+    /usr/libexec/vpn-manager/healthcheck.sh \
+    /usr/libexec/vpn-manager/rollback.sh \
+    /usr/libexec/vpn-manager/backup.sh \
+    /usr/libexec/vpn-manager/restore.sh \
+    /etc/init.d/vpn-manager
+do
+    [ -f "$f" ] || continue
+    sed -i 's/\r$//' "$f"
+done
+
 if [ ! -f /etc/config/vpn-manager ]; then
     install -m 0644 "$BASE_DIR/etc/config/vpn-manager" /etc/config/vpn-manager
 fi

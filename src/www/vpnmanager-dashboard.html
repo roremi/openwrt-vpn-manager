@@ -810,6 +810,65 @@
             });
         }
 
+        function importConf() {
+            const fileInput = document.getElementById('import-file');
+            const idInput = document.getElementById('import-id');
+            const statusEl = document.getElementById('import-status');
+            const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+
+            if (!file) {
+                return showToast('Please choose a .conf file', false);
+            }
+
+            let importId = (idInput.value || '').trim();
+            if (!importId) {
+                importId = ('vpn_' + file.name.replace(/\.[^.]+$/, '').toLowerCase())
+                    .replace(/[^a-z0-9]+/g, '_')
+                    .replace(/^_+|_+$/g, '')
+                    .slice(0, 32);
+            }
+
+            if (!importId) {
+                return showToast('Import ID is invalid', false);
+            }
+
+            statusEl.textContent = 'Reading file...';
+            const reader = new FileReader();
+
+            reader.onerror = function () {
+                statusEl.textContent = 'Unable to read file';
+                showToast('Unable to read selected file', false);
+            };
+
+            reader.onload = function () {
+                const content = String(reader.result || '').trim();
+                if (!content) {
+                    statusEl.textContent = 'File is empty';
+                    showToast('The selected file is empty', false);
+                    return;
+                }
+
+                statusEl.textContent = 'Importing profile...';
+                apiPost('/import', {
+                    id: importId,
+                    content: content
+                }).then(res => {
+                    if (res.ok === false) throw new Error(res.error || 'Import failed');
+                    statusEl.textContent = 'Imported profile: ' + importId;
+                    idInput.value = importId;
+                    fileInput.value = '';
+                    return applyIfNeeded();
+                }).then(() => refreshAll()).then(() => {
+                    showToast('Config imported successfully', true);
+                }).catch(e => {
+                    statusEl.textContent = 'Import failed: ' + e.message;
+                    showToast(e.message, false);
+                });
+            };
+
+            reader.readAsText(file);
+        }
+
         // Profiles
         function loadProfiles() {
             return apiGet('/profiles').then(d => {

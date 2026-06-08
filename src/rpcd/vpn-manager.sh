@@ -105,22 +105,74 @@ multiebay_pick_conf() {
     ] | map(select(type == "string" and length > 0)) | .[0] // ""' 2>/dev/null
 }
 
+multiebay_urlencode_component() {
+    jq -nr --arg v "$1" '$v|@uri'
+}
+
+multiebay_normalize_proxy_url() {
+    raw="$1"
+    scheme="$(printf '%s' "$raw" | sed -E 's#^([a-zA-Z0-9+.-]+)://.*#\1#')"
+    auth_host="$(printf '%s' "$raw" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#/.*$##')"
+
+    if ! printf '%s' "$auth_host" | grep -q '@'; then
+        printf '%s' "$raw"
+        return 0
+    fi
+
+    auth="$(printf '%s' "$auth_host" | sed -E 's#^(.*)@[^@]*$#\1#')"
+    hostport="$(printf '%s' "$auth_host" | sed -E 's#^.*@([^@]*)$#\1#')"
+
+    if printf '%s' "$auth" | grep -q ':'; then
+        user="${auth%%:*}"
+        pass="${auth#*:}"
+    else
+        user="$auth"
+        pass=""
+    fi
+
+    user_enc="$(multiebay_urlencode_component "$user")"
+    if [ -n "$pass" ]; then
+        pass_enc="$(multiebay_urlencode_component "$pass")"
+        printf '%s://%s:%s@%s' "$scheme" "$user_enc" "$pass_enc" "$hostport"
+    else
+        printf '%s://%s@%s' "$scheme" "$user_enc" "$hostport"
+    fi
+}
+
 multiebay_lookup_gateway_by_proxy() {
     proxy_url="$1"
-    proxy_user="$(echo "$proxy_url" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#:.*@.*$##')"
-    proxy_hostport="$(echo "$proxy_url" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#^[^@]+@##')"
-    proxy_scheme="$(echo "$proxy_url" | sed -E 's#^([a-zA-Z0-9+.-]+)://.*#\1#')"
+    proxy_hostport="$(echo "$proxy_url" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#^.*@##; s#/.*$##')"
+    proxy_host="$(printf '%s' "$proxy_hostport" | sed -E 's#:[0-9]+$##')"
     jq -r \
         --arg proxy "$proxy_url" \
-        --arg proxy_prefix "${proxy_scheme}://${proxy_user}:" \
-        --arg proxy_suffix "@${proxy_hostport}" \
+        --arg proxy_hostport "$proxy_hostport" \
+        --arg proxy_host "$proxy_host" \
         '[
-        (.proxies[]? | select((.proxy_url // .proxy // .upstream // .url // "") == $proxy) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
-        (.items[]? | select((.proxy_url // .proxy // .upstream // .url // "") == $proxy) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
-        (.data[]? | select((.proxy_url // .proxy // .upstream // .url // "") == $proxy) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
+        (.proxies[]? | select(
+            ((.proxy_url // .proxy // .upstream // .url // "") == $proxy) or
+            ((.proxy_url // .proxy // .upstream // .url // "") | contains("@" + $proxy_hostport)) or
+            ((.proxy_url // .proxy // .upstream // .url // "") | endswith($proxy_hostport)) or
+            ((.host // .hostname // "") == $proxy_host)
+        ) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
+        (.items[]? | select(
+            ((.proxy_url // .proxy // .upstream // .url // "") == $proxy) or
+            ((.proxy_url // .proxy // .upstream // .url // "") | contains("@" + $proxy_hostport)) or
+            ((.proxy_url // .proxy // .upstream // .url // "") | endswith($proxy_hostport)) or
+            ((.host // .hostname // "") == $proxy_host)
+        ) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
+        (.data[]? | select(
+            ((.proxy_url // .proxy // .upstream // .url // "") == $proxy) or
+            ((.proxy_url // .proxy // .upstream // .url // "") | contains("@" + $proxy_hostport)) or
+            ((.proxy_url // .proxy // .upstream // .url // "") | endswith($proxy_hostport)) or
+            ((.host // .hostname // "") == $proxy_host)
+        ) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
         (.gateways[]? | select(
             ((.proxy_url // .proxy // .upstream // .url // "") == $proxy) or
-            (((.proxy_display // "") | startswith($proxy_prefix)) and ((.proxy_display // "") | endswith($proxy_suffix)))
+            ((.proxy_url // .proxy // .upstream // .url // "") | contains("@" + $proxy_hostport)) or
+            ((.proxy_url // .proxy // .upstream // .url // "") | endswith($proxy_hostport)) or
+            ((.proxy_display // "") | contains("@" + $proxy_hostport)) or
+            ((.proxy_display // "") | endswith($proxy_hostport)) or
+            ((.host // .hostname // "") == $proxy_host)
         ) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty))
     ] | map(select(type == "string" and length > 0)) | .[0] // ""' 2>/dev/null
 }
@@ -139,7 +191,7 @@ multiebay_proxy_to_url() {
 
     case "$raw" in
         *://*)
-            printf '%s' "$raw"
+            multiebay_normalize_proxy_url "$raw"
             return 0
             ;;
     esac
@@ -151,7 +203,9 @@ multiebay_proxy_to_url() {
         rest="${rest#*:}"
         user="${rest%%:*}"
         pass="${rest#*:}"
-        printf 'socks5://%s:%s@%s:%s' "$user" "$pass" "$host" "$port"
+        user_enc="$(multiebay_urlencode_component "$user")"
+        pass_enc="$(multiebay_urlencode_component "$pass")"
+        printf 'socks5://%s:%s@%s:%s' "$user_enc" "$pass_enc" "$host" "$port"
         return 0
     fi
 
