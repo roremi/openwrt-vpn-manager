@@ -141,40 +141,54 @@ multiebay_normalize_proxy_url() {
 
 multiebay_lookup_gateway_by_proxy() {
     proxy_url="$1"
-    proxy_hostport="$(echo "$proxy_url" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#^.*@##; s#/.*$##')"
-    proxy_host="$(printf '%s' "$proxy_hostport" | sed -E 's#:[0-9]+$##')"
+
+    # Prefer exact URL matches first to avoid selecting the wrong gateway when many proxies share host:port.
     jq -r \
         --arg proxy "$proxy_url" \
+        '[
+        (.proxies[]? | select((.proxy_url // .proxy // .upstream // .url // "") == $proxy) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
+        (.items[]? | select((.proxy_url // .proxy // .upstream // .url // "") == $proxy) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
+        (.data[]? | select((.proxy_url // .proxy // .upstream // .url // "") == $proxy) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
+        (.gateways[]? | select((.proxy_url // .proxy // .upstream // .url // "") == $proxy) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty))
+    ] | map(select(type == "string" and length > 0)) | .[0] // ""' 2>/dev/null
+}
+
+multiebay_lookup_gateway_by_hostport_unique() {
+    proxy_url="$1"
+    proxy_hostport="$(echo "$proxy_url" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#^.*@##; s#/.*$##')"
+    proxy_host="$(printf '%s' "$proxy_hostport" | sed -E 's#:[0-9]+$##')"
+
+    # Host/port fallback is used only when it maps to exactly one gateway.
+    jq -r \
         --arg proxy_hostport "$proxy_hostport" \
         --arg proxy_host "$proxy_host" \
         '[
         (.proxies[]? | select(
-            ((.proxy_url // .proxy // .upstream // .url // "") == $proxy) or
             ((.proxy_url // .proxy // .upstream // .url // "") | contains("@" + $proxy_hostport)) or
             ((.proxy_url // .proxy // .upstream // .url // "") | endswith($proxy_hostport)) or
             ((.host // .hostname // "") == $proxy_host)
         ) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
         (.items[]? | select(
-            ((.proxy_url // .proxy // .upstream // .url // "") == $proxy) or
             ((.proxy_url // .proxy // .upstream // .url // "") | contains("@" + $proxy_hostport)) or
             ((.proxy_url // .proxy // .upstream // .url // "") | endswith($proxy_hostport)) or
             ((.host // .hostname // "") == $proxy_host)
         ) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
         (.data[]? | select(
-            ((.proxy_url // .proxy // .upstream // .url // "") == $proxy) or
             ((.proxy_url // .proxy // .upstream // .url // "") | contains("@" + $proxy_hostport)) or
             ((.proxy_url // .proxy // .upstream // .url // "") | endswith($proxy_hostport)) or
             ((.host // .hostname // "") == $proxy_host)
         ) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty)),
         (.gateways[]? | select(
-            ((.proxy_url // .proxy // .upstream // .url // "") == $proxy) or
             ((.proxy_url // .proxy // .upstream // .url // "") | contains("@" + $proxy_hostport)) or
             ((.proxy_url // .proxy // .upstream // .url // "") | endswith($proxy_hostport)) or
             ((.proxy_display // "") | contains("@" + $proxy_hostport)) or
             ((.proxy_display // "") | endswith($proxy_hostport)) or
             ((.host // .hostname // "") == $proxy_host)
         ) | (.name // .gateway_name // .gatewayName // .gateway.name // .id // empty))
-    ] | map(select(type == "string" and length > 0)) | .[0] // ""' 2>/dev/null
+    ]
+    | map(select(type == "string" and length > 0))
+    | unique
+    | if length == 1 then .[0] else "" end' 2>/dev/null
 }
 
 urlencode() {
@@ -1058,7 +1072,11 @@ create_multiebay_profile() {
         fi
 
         if [ -z "$gateway_name" ]; then
-            echo '{"ok":false,"error":"unable to determine created gateway name from MultiEbay"}'
+            gateway_name="$(printf '%s' "$proxies_resp" | multiebay_lookup_gateway_by_hostport_unique "$proxy_url")"
+        fi
+
+        if [ -z "$gateway_name" ]; then
+            echo '{"ok":false,"error":"unable to determine created gateway name from MultiEbay (ambiguous host/port match)"}'
             return
         fi
     fi
