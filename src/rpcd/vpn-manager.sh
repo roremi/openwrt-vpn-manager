@@ -59,21 +59,56 @@ http_json_request() {
 multiebay_pick_gateway_name() {
     jq -r '[
         .name,
+        (.id | tostring?),
+        .gateway_id,
         .gateway_name,
         .gatewayName,
         (if (.gateway | type) == "string" then .gateway else empty end),
         .gateway.name,
+        (.gateway.id | tostring?),
         .data.name,
+        (.data.id | tostring?),
+        .data.gateway_id,
         .data.gateway_name,
         .data.gatewayName,
         (if (.data.gateway | type) == "string" then .data.gateway else empty end),
         .data.gateway.name,
+        (.data.gateway.id | tostring?),
         .result.name,
+        (.result.id | tostring?),
+        .result.gateway_id,
         .result.gateway_name,
         .result.gatewayName,
         (if (.result.gateway | type) == "string" then .result.gateway else empty end),
-        .result.gateway.name
+        .result.gateway.name,
+        (.result.gateway.id | tostring?)
     ] | map(select(type == "string" and length > 0)) | .[0] // ""' 2>/dev/null
+}
+
+multiebay_pick_new_gateway_from_lists() {
+    before_json="$1"
+    after_json="$2"
+
+    jq -nr \
+        --argjson before "${before_json:-[]}" \
+        --argjson after "${after_json:-[]}" \
+        '
+        def names($doc):
+            [
+                $doc.proxies[]?,
+                $doc.items[]?,
+                $doc.data[]?,
+                $doc.gateways[]?
+            ]
+            | map(
+                .name // .gateway_name // .gatewayName // .gateway.name // (.id|tostring?) // (.gateway.id|tostring?) // empty
+            )
+            | map(select(type == "string" and length > 0))
+            | unique;
+
+        (names($after) - names($before)) as $added
+        | if ($added | length) == 1 then $added[0] else "" end
+        ' 2>/dev/null
 }
 
 multiebay_pick_wg_name() {
@@ -200,7 +235,7 @@ multiebay_slug() {
 }
 
 multiebay_proxy_to_url() {
-    raw="$(echo "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    raw="$(printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     [ -n "$raw" ] || return 1
 
     case "$raw" in
@@ -210,17 +245,22 @@ multiebay_proxy_to_url() {
             ;;
     esac
 
-    if echo "$raw" | grep -Eq '^[^:]+:[0-9]+:[^:]+:.+$'; then
+    # Robust ip:port:user:pass parsing (password may contain additional colons).
+    field_count="$(printf '%s' "$raw" | awk -F: '{print NF}')"
+    if [ -n "$field_count" ] && [ "$field_count" -ge 4 ]; then
         host="${raw%%:*}"
         rest="${raw#*:}"
         port="${rest%%:*}"
         rest="${rest#*:}"
         user="${rest%%:*}"
         pass="${rest#*:}"
-        user_enc="$(multiebay_urlencode_component "$user")"
-        pass_enc="$(multiebay_urlencode_component "$pass")"
-        printf 'socks5://%s:%s@%s:%s' "$user_enc" "$pass_enc" "$host" "$port"
-        return 0
+
+        if echo "$port" | grep -Eq '^[0-9]+$' && [ -n "$host" ] && [ -n "$user" ] && [ -n "$pass" ]; then
+            user_enc="$(multiebay_urlencode_component "$user")"
+            pass_enc="$(multiebay_urlencode_component "$pass")"
+            printf 'socks5://%s:%s@%s:%s' "$user_enc" "$pass_enc" "$host" "$port"
+            return 0
+        fi
     fi
 
     if echo "$raw" | grep -Eq '^[^@]+@[^:]+:[0-9]+$'; then
@@ -288,36 +328,84 @@ clear_multiebay_api_key() {
 lookup_public_ip() {
     iface="$1"
     if [ -n "$iface" ]; then
-        curl -sS --interface "$iface" --max-time 10 https://ipwho.is/ 2>/dev/null || true
+        curl -sS --interface "$iface" --connect-timeout 2 --max-time 4 https://ipwho.is/ 2>/dev/null || true
     else
-        curl -sS --max-time 10 https://ipwho.is/ 2>/dev/null || true
+        curl -sS --connect-timeout 2 --max-time 4 https://ipwho.is/ 2>/dev/null || true
+    fi
+}
+
+vm_profile_status_from_age() {
+    iface="$1"
+    age="$2"
+    max_age="${3:-180}"
+
+    ip link show dev "$iface" >/dev/null 2>&1 || {
+        echo "down"
+        return
+    }
+
+    link_line="$(ip link show dev "$iface" 2>/dev/null | head -n1)"
+    echo "$link_line" | grep -q '<[^>]*UP[^>]*>' || {
+        echo "down"
+        return
+    }
+
+    if [ "$age" -le "$max_age" ]; then
+        echo "healthy"
+        return
+    fi
+
+    if vm_ping_iface "$iface"; then
+        echo "degraded"
+    else
+        echo "down"
     fi
 }
 
 route_status() {
-    printf '{"ok":true,"wan":'
-    wan_json="$(lookup_public_ip "")"
-    if [ -n "$wan_json" ]; then
-        printf '%s' "$wan_json"
-    else
-        printf '{"success":false}'
+    cache_file="$VM_STATE_DIR/route-status-cache.json"
+    cache_ttl="${VM_ROUTE_STATUS_TTL:-20}"
+
+    vm_init_dirs
+    if [ -f "$cache_file" ]; then
+        now="$(date +%s)"
+        mtime="$(date -r "$cache_file" +%s 2>/dev/null || echo 0)"
+        if [ $((now - mtime)) -lt "$cache_ttl" ]; then
+            cat "$cache_file"
+            return
+        fi
     fi
 
-    printf ',"profiles":['
-    first=1
-    for sec in $(vm_profile_list); do
-        [ $first -eq 1 ] || printf ','
-        first=0
-        iface="$(uci -q get vpn-manager.$sec.iface)"
-        ip_json="$(lookup_public_ip "$iface")"
-        [ -n "$ip_json" ] || ip_json='{"success":false}'
-        printf '{"id":"%s","name":"%s","iface":"%s","ip":%s}' \
-            "$sec" \
-            "$(json_escape "$(uci -q get vpn-manager.$sec.name)")" \
-            "$(json_escape "$iface")" \
-            "$ip_json"
-    done
-    printf ']}'
+    tmp_file="$VM_STATE_DIR/route-status-$$.json"
+    payload="$({
+        printf '{"ok":true,"wan":'
+        wan_json="$(lookup_public_ip "")"
+        if [ -n "$wan_json" ]; then
+            printf '%s' "$wan_json"
+        else
+            printf '{"success":false}'
+        fi
+
+        printf ',"profiles":['
+        first=1
+        for sec in $(vm_profile_list); do
+            [ $first -eq 1 ] || printf ','
+            first=0
+            iface="$(uci -q get vpn-manager.$sec.iface)"
+            ip_json="$(lookup_public_ip "$iface")"
+            [ -n "$ip_json" ] || ip_json='{"success":false}'
+            printf '{"id":"%s","name":"%s","iface":"%s","ip":%s}' \
+                "$sec" \
+                "$(json_escape "$(uci -q get vpn-manager.$sec.name)")" \
+                "$(json_escape "$iface")" \
+                "$ip_json"
+        done
+        printf ']}'
+    })"
+
+    printf '%s' "$payload"
+    printf '%s' "$payload" > "$tmp_file" 2>/dev/null || true
+    [ -s "$tmp_file" ] && mv "$tmp_file" "$cache_file" || rm -f "$tmp_file"
 }
 
 vm_wifi_binding_pick_radio() {
@@ -620,8 +708,8 @@ list_profiles() {
         mtu="$(uci -q get vpn-manager.$sec.mtu)"
         keepalive="$(uci -q get vpn-manager.$sec.persistent_keepalive)"
         public_key="$(uci -q get vpn-manager.$sec.public_key)"
-        status="$(vm_profile_health "$iface" "180" || true)"
         hs_age="$(vm_handshake_age "$iface")"
+        status="$(vm_profile_status_from_age "$iface" "$hs_age" "180")"
         printf '{"id":"%s","name":"%s","iface":"%s","endpoint":"%s","enabled":"%s","status":"%s","handshake_age":"%s","address":"%s","dns":"%s","allowed_ips":"%s","mtu":"%s","persistent_keepalive":"%s","public_key":"%s"}' \
             "$sec" "$(json_escape "$name")" "$iface" "$endpoint" "$enabled" "$status" "$hs_age" "$(json_escape "$address")" "$(json_escape "$dns")" "$(json_escape "$allowed_ips")" "$mtu" "$keepalive" "$(json_escape "$public_key")"
     done
@@ -714,7 +802,8 @@ status() {
     down=0
     for sec in $(vm_profile_list); do
         iface="$(uci -q get vpn-manager.$sec.iface)"
-        s="$(vm_profile_health "$iface" "180" || true)"
+        hs_age="$(vm_handshake_age "$iface")"
+        s="$(vm_profile_status_from_age "$iface" "$hs_age" "180")"
         if [ "$s" = "healthy" ]; then
             up=$((up + 1))
         else
@@ -1062,12 +1151,17 @@ create_multiebay_profile() {
             return
         fi
     elif [ -z "$gateway_name" ]; then
+        proxies_before="$(http_json_request "GET" "$api_base/api/customer/proxies" "$api_key" 2>/dev/null || true)"
         proxy_payload="$(jq -cn --arg proxy_url "$proxy_url" --argjson allow_http_proxy "$allow_http_proxy_json" '{proxy_url:$proxy_url, allow_http_proxy:$allow_http_proxy}')"
         gateway_resp="$(http_json_request "POST" "$api_base/api/customer/proxy" "$api_key" "$proxy_payload" 2>/dev/null || true)"
         gateway_name="$(printf '%s' "$gateway_resp" | multiebay_pick_gateway_name)"
 
         if [ -z "$gateway_name" ]; then
             proxies_resp="$(http_json_request "GET" "$api_base/api/customer/proxies" "$api_key" 2>/dev/null || true)"
+            gateway_name="$(multiebay_pick_new_gateway_from_lists "$proxies_before" "$proxies_resp")"
+        fi
+
+        if [ -z "$gateway_name" ]; then
             gateway_name="$(printf '%s' "$proxies_resp" | multiebay_lookup_gateway_by_proxy "$proxy_url")"
         fi
 

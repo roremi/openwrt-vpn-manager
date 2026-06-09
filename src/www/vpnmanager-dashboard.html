@@ -1110,7 +1110,18 @@
         document.addEventListener('DOMContentLoaded', () => {
             switchTab('dashboard', document.querySelector('.menu-tab'));
             refreshAll();
-            setInterval(() => { loadStatus(); loadProfiles(); loadPolicies(); loadDevices(); }, 8000);
+            setInterval(() => {
+                loadStatus()
+                    .then(loadProfiles)
+                    .then(loadPolicies)
+                    .then(loadDevices)
+                    .catch(() => {});
+            }, 8000);
+            setInterval(() => {
+                loadRouteStatus()
+                    .then(loadProfiles)
+                    .catch(() => {});
+            }, 30000);
         });
 
     </script>
