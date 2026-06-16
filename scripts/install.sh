@@ -24,6 +24,7 @@ install -m 0755 "$BASE_DIR/src/rpcd/vpn-manager.sh" /usr/libexec/rpcd/vpn-manage
 install -m 0644 "$BASE_DIR/src/luci/controller/vpnmanager.lua" /usr/lib/lua/luci/controller/vpnmanager.lua
 install -m 0644 "$BASE_DIR/src/luci/view/vpnmanager/dashboard.htm" /usr/lib/lua/luci/view/vpnmanager/dashboard.htm
 install -m 0644 "$BASE_DIR/src/www/vpnmanager-dashboard.html" /www/vpnmanager-dashboard.html
+install -m 0644 "$BASE_DIR/src/www/vpnmanager-api-docs.html" /www/vpnmanager-api-docs.html
 
 install -m 0755 "$BASE_DIR/src/init.d/vpn-manager" /etc/init.d/vpn-manager
 

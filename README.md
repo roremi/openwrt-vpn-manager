@@ -24,6 +24,12 @@ A production-oriented OpenWrt package for managing multiple WireGuard profiles, 
 - scripts/: installer and operational scripts
 - tests/: unit and integration tests
 
+## API Documentation
+
+- OpenAPI spec: docs/api-spec.yaml
+- Usage guide: docs/api-usage.md
+- LuCI web docs page: Services -> VPN Manager -> API Docs
+
 ## Quick Install (on OpenWrt)
 
 This section is written for beginners and assumes you want to install directly on a running OpenWrt router.

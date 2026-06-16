@@ -1,5 +1,7 @@
 module("luci.controller.vpnmanager", package.seeall)
 
+local uci = require("luci.model.uci").cursor()
+
 function index()
     if not nixio.fs.access("/etc/config/vpn-manager") then
         return
@@ -27,9 +29,57 @@ function index()
     entry({"admin", "services", "vpnmanager", "multiebay_settings"}, call("rpc_multiebay_settings")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings_save"}, call("rpc_multiebay_settings_save")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings_clear"}, call("rpc_multiebay_settings_clear")).leaf = true
+    entry({"admin", "services", "vpnmanager", "software_api_settings"}, call("rpc_software_api_settings")).leaf = true
+    entry({"admin", "services", "vpnmanager", "software_api_settings_save"}, call("rpc_software_api_settings_save")).leaf = true
+    entry({"admin", "services", "vpnmanager", "software_api_settings_clear"}, call("rpc_software_api_settings_clear")).leaf = true
+    entry({"admin", "services", "vpnmanager", "software_api_settings_rotate"}, call("rpc_software_api_settings_rotate")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_import"}, call("rpc_multiebay_import")).leaf = true
     entry({"admin", "services", "vpnmanager", "apply"}, call("rpc_apply")).leaf = true
     entry({"admin", "services", "vpnmanager", "rollback"}, call("rpc_rollback")).leaf = true
+    entry({"admin", "services", "vpnmanager", "api_docs"}, call("api_docs")).leaf = true
+
+    -- Public software API (token protected) to avoid LuCI session login flows.
+    local p
+
+    p = entry({"vpnmanager", "api", "v1", "devices"}, call("api_v1_devices"), nil)
+    p.leaf = true
+    p.dependent = false
+    p.sysauth = false
+
+    p = entry({"vpnmanager", "api", "v1", "profiles"}, call("api_v1_profiles"), nil)
+    p.leaf = true
+    p.dependent = false
+    p.sysauth = false
+
+    p = entry({"vpnmanager", "api", "v1", "policies"}, call("api_v1_policies"), nil)
+    p.leaf = true
+    p.dependent = false
+    p.sysauth = false
+
+    p = entry({"vpnmanager", "api", "v1", "status"}, call("api_v1_status"), nil)
+    p.leaf = true
+    p.dependent = false
+    p.sysauth = false
+
+    p = entry({"vpnmanager", "api", "v1", "route_status"}, call("api_v1_route_status"), nil)
+    p.leaf = true
+    p.dependent = false
+    p.sysauth = false
+
+    p = entry({"vpnmanager", "api", "v1", "policy"}, call("api_v1_set_policy"), nil)
+    p.leaf = true
+    p.dependent = false
+    p.sysauth = false
+
+    p = entry({"vpnmanager", "api", "v1", "apply"}, call("api_v1_apply"), nil)
+    p.leaf = true
+    p.dependent = false
+    p.sysauth = false
+
+    p = entry({"vpnmanager", "api", "v1", "rollback"}, call("api_v1_rollback"), nil)
+    p.leaf = true
+    p.dependent = false
+    p.sysauth = false
 end
 
 function dashboard()
@@ -45,10 +95,59 @@ function dashboard()
     luci.http.write(html)
 end
 
+function api_docs()
+    local html = nixio.fs.readfile("/www/vpnmanager-api-docs.html")
+    if not html then
+        luci.http.status(404, "Not Found")
+        luci.http.prepare_content("text/plain")
+        luci.http.write("vpnmanager api docs not installed")
+        return
+    end
+
+    luci.http.prepare_content("text/html")
+    luci.http.write(html)
+end
+
 local function run_rpc(method)
     local out = luci.sys.exec("/usr/libexec/rpcd/vpn-manager " .. method)
     luci.http.prepare_content("application/json")
     luci.http.write(out)
+end
+
+local function api_write_json(code, body)
+    luci.http.status(code)
+    luci.http.prepare_content("application/json")
+    luci.http.write(body)
+end
+
+local function vm_software_api_key()
+    return tostring(uci:get("vpn-manager", "global", "software_api_key") or "")
+end
+
+local function api_require_key()
+    local expected = vm_software_api_key()
+    if expected == "" then
+        api_write_json(503, '{"ok":false,"error":"software_api_key is not configured"}')
+        return false
+    end
+
+    local auth = luci.http.getenv("HTTP_AUTHORIZATION") or ""
+    local bearer = auth:match("^Bearer%s+(.+)$")
+    local provided =
+        luci.http.getenv("HTTP_X_API_KEY") or
+        luci.http.getenv("HTTP_X_APIKEY") or
+        luci.http.getenv("HTTP_API_KEY") or
+        bearer or
+        luci.http.formvalue("api_key") or
+        ""
+
+    provided = tostring(provided or "")
+    if provided ~= expected then
+        api_write_json(401, '{"ok":false,"error":"invalid api key"}')
+        return false
+    end
+
+    return true
 end
 
 local function sq(v)
@@ -258,10 +357,74 @@ function rpc_multiebay_settings_clear()
     run_rpc("clear_multiebay_api_key")
 end
 
+function rpc_software_api_settings()
+    run_rpc("list_software_api_settings")
+end
+
+function rpc_software_api_settings_save()
+    local api_key = luci.http.formvalue("api_key") or ""
+    run_rpc("save_software_api_key " .. sq(api_key))
+end
+
+function rpc_software_api_settings_clear()
+    run_rpc("clear_software_api_key")
+end
+
+function rpc_software_api_settings_rotate()
+    run_rpc("rotate_software_api_key")
+end
+
 function rpc_apply()
     run_rpc("apply")
 end
 
 function rpc_rollback()
+    run_rpc("rollback")
+end
+
+function api_v1_devices()
+    if not api_require_key() then return end
+    run_rpc("list_devices")
+end
+
+function api_v1_profiles()
+    if not api_require_key() then return end
+    run_rpc("list_profiles")
+end
+
+function api_v1_policies()
+    if not api_require_key() then return end
+    run_rpc("list_policies")
+end
+
+function api_v1_status()
+    if not api_require_key() then return end
+    run_rpc("status")
+end
+
+function api_v1_route_status()
+    if not api_require_key() then return end
+    run_rpc("route_status")
+end
+
+function api_v1_set_policy()
+    if not api_require_key() then return end
+
+    local section = luci.http.formvalue("section") or ""
+    local mac = luci.http.formvalue("mac") or ""
+    local ip = luci.http.formvalue("ip") or ""
+    local hostname = luci.http.formvalue("hostname") or ""
+    local target = luci.http.formvalue("target") or "wan"
+
+    run_rpc("set_policy " .. sq(section) .. " " .. sq(mac) .. " " .. sq(ip) .. " " .. sq(hostname) .. " " .. sq(target))
+end
+
+function api_v1_apply()
+    if not api_require_key() then return end
+    run_rpc("apply")
+end
+
+function api_v1_rollback()
+    if not api_require_key() then return end
     run_rpc("rollback")
 end

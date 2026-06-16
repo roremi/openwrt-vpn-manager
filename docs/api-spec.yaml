@@ -1,199 +1,657 @@
 openapi: 3.0.3
 info:
-  title: OpenWrt VPN Manager API
-  version: 1.0.0
+  title: OpenWrt VPN Manager LuCI API
+  version: 2.0.0
+  description: |
+    This spec documents the HTTP API exposed by LuCI controller mappings for vpn-manager.
+    Read endpoints are GET. Write endpoints are POST with application/x-www-form-urlencoded payloads.
 servers:
-  - url: /ubus/vpn-manager
+  - url: /cgi-bin/luci/admin/services/vpnmanager
+tags:
+  - name: Profiles
+  - name: Devices
+  - name: Policies
+  - name: WiFi
+  - name: MultiEbay
+  - name: Operations
 paths:
   /profiles:
     get:
-      summary: List VPN profiles
+      tags: [Profiles]
+      summary: List profiles
       responses:
         '200':
-          description: OK
+          description: Profile list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Profile'
+  /profile:
     post:
-      summary: Create profile
+      tags: [Profiles]
+      summary: Create or update profile
       requestBody:
         required: true
         content:
-          application/json:
+          application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/ProfileCreate'
+              $ref: '#/components/schemas/ProfileUpsertRequest'
       responses:
         '200':
-          description: Created
-  /profiles/{id}:
-    put:
-      summary: Update profile
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProfileUpdate'
-      responses:
-        '200':
-          description: Updated
-    delete:
+          description: Operation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /profile_delete:
+    post:
+      tags: [Profiles]
       summary: Delete profile
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Deleted
-  /profiles/import:
-    post:
-      summary: Import WireGuard config
       requestBody:
         required: true
         content:
-          application/json:
+          application/x-www-form-urlencoded:
             schema:
               type: object
+              required: [id]
               properties:
-                conf:
+                id:
                   type: string
       responses:
         '200':
-          description: Imported
-  /profiles/{id}/toggle:
+          description: Operation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /toggle:
     post:
+      tags: [Profiles]
       summary: Enable or disable profile
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
       requestBody:
+        required: true
         content:
-          application/json:
+          application/x-www-form-urlencoded:
             schema:
               type: object
+              required: [id, enabled]
               properties:
+                id:
+                  type: string
                 enabled:
-                  type: boolean
+                  type: string
+                  enum: ['0', '1']
       responses:
         '200':
-          description: Toggled
-  /profiles/{id}/test:
+          description: Operation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /test:
     post:
-      summary: Test profile connectivity and latency
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
+      tags: [Profiles]
+      summary: Test profile health and latency
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:
+                  type: string
       responses:
         '200':
           description: Test result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  state:
+                    type: string
+                  latency:
+                    type: string
+  /import:
+    post:
+      tags: [Profiles]
+      summary: Import WireGuard profile from file path or raw content
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:
+                  type: string
+                path:
+                  type: string
+                  description: Router-local conf path
+                content:
+                  type: string
+                  description: Raw conf text. If set, temporary file is created by LuCI.
+      responses:
+        '200':
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
   /devices:
     get:
+      tags: [Devices]
       summary: List discovered LAN devices
       responses:
         '200':
-          description: OK
+          description: Device list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Device'
+
   /policies:
-    post:
-      summary: Set per-device route target
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DevicePolicy'
+    get:
+      tags: [Policies]
+      summary: List device routing policies
       responses:
         '200':
-          description: Updated
-  /policies/bulk:
+          description: Policy list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  policies:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Policy'
+  /policy:
     post:
-      summary: Bulk assign policies
+      tags: [Policies]
+      summary: Assign route target to a device (WAN or VPN profile)
       requestBody:
         required: true
         content:
-          application/json:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [section, mac, target]
+              properties:
+                section:
+                  type: string
+                  description: Stable policy section id (for update semantics)
+                mac:
+                  type: string
+                ip:
+                  type: string
+                hostname:
+                  type: string
+                target:
+                  type: string
+                  description: wan or vpn profile id
+      responses:
+        '200':
+          description: Assignment result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /policy_delete:
+    post:
+      tags: [Policies]
+      summary: Delete one policy section
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [section]
+              properties:
+                section:
+                  type: string
+      responses:
+        '200':
+          description: Delete result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
+  /status:
+    get:
+      tags: [Operations]
+      summary: Get profile health counters
+      responses:
+        '200':
+          description: Status counters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  up:
+                    type: integer
+                  down:
+                    type: integer
+                  timestamp:
+                    type: string
+  /route_status:
+    get:
+      tags: [Operations]
+      summary: Get route target and exit IP status map
+      responses:
+        '200':
+          description: Route status map
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /audit:
+    get:
+      tags: [Operations]
+      summary: Read recent audit log
+      responses:
+        '200':
+          description: Audit lines
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lines:
+                    type: array
+                    items:
+                      type: string
+  /apply:
+    post:
+      tags: [Operations]
+      summary: Reconcile and apply current config
+      responses:
+        '200':
+          description: Apply result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /rollback:
+    post:
+      tags: [Operations]
+      summary: Roll back to latest checkpoint
+      responses:
+        '200':
+          description: Rollback result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
+  /wifi:
+    get:
+      tags: [WiFi]
+      summary: Read base WiFi settings
+      responses:
+        '200':
+          description: WiFi settings
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /wifi_set:
+    post:
+      tags: [WiFi]
+      summary: Update base WiFi settings
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
             schema:
               type: object
               properties:
-                items:
-                  type: array
-                  items:
-                    $ref: '#/components/schemas/DevicePolicy'
+                ssid:
+                  type: string
+                key:
+                  type: string
+                encryption:
+                  type: string
+                channel:
+                  type: string
+                enabled:
+                  type: string
+                  enum: ['0', '1']
       responses:
         '200':
-          description: Updated
-  /apply:
-    post:
-      summary: Validate, commit, and apply staged config
-      responses:
-        '200':
-          description: Applied
-  /rollback:
-    post:
-      summary: Rollback latest checkpoint
-      responses:
-        '200':
-          description: Rolled back
-  /status:
+          description: Save result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /wifi_bindings:
     get:
-      summary: Dashboard status
+      tags: [WiFi]
+      summary: List dedicated WiFi VPN bindings
       responses:
         '200':
-          description: OK
-  /logs/audit:
+          description: Binding list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bindings:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+  /wifi_binding:
+    post:
+      tags: [WiFi]
+      summary: Create or update dedicated WiFi VPN binding
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [id, ssid, target]
+              properties:
+                id:
+                  type: string
+                ssid:
+                  type: string
+                key:
+                  type: string
+                encryption:
+                  type: string
+                target:
+                  type: string
+                  description: vpn profile id
+                enabled:
+                  type: string
+                  enum: ['0', '1']
+      responses:
+        '200':
+          description: Save result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /wifi_binding_delete:
+    post:
+      tags: [WiFi]
+      summary: Delete dedicated WiFi VPN binding
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:
+                  type: string
+      responses:
+        '200':
+          description: Delete result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
+  /multiebay_settings:
     get:
-      summary: Read audit log
+      tags: [MultiEbay]
+      summary: Read MultiEbay integration settings
       responses:
         '200':
-          description: OK
+          description: Settings
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /multiebay_settings_save:
+    post:
+      tags: [MultiEbay]
+      summary: Save MultiEbay settings
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                api_base:
+                  type: string
+                api_key:
+                  type: string
+                allow_http_proxy:
+                  type: string
+                  enum: ['0', '1']
+      responses:
+        '200':
+          description: Save result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /multiebay_settings_clear:
+    post:
+      tags: [MultiEbay]
+      summary: Clear saved MultiEbay API key
+      responses:
+        '200':
+          description: Clear result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /multiebay_import:
+    post:
+      tags: [MultiEbay]
+      summary: Create profile from MultiEbay proxy or gateway
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: string
+                api_base:
+                  type: string
+                api_key:
+                  type: string
+                proxy_url:
+                  type: string
+                gateway_name:
+                  type: string
+                client_name:
+                  type: string
+                profile_name:
+                  type: string
+                allow_http_proxy:
+                  type: string
+                  enum: ['0', '1']
+      responses:
+        '200':
+          description: Create/import result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  id:
+                    type: string
+                  gateway_name:
+                    type: string
+                  wg_name:
+                    type: string
+                  error:
+                    type: string
+
 components:
   schemas:
-    ProfileCreate:
+    OkResponse:
       type: object
-      required: [name, endpoint_host, endpoint_port, private_key, public_key]
       properties:
+        ok:
+          type: boolean
+        error:
+          type: string
+      examples:
+        success:
+          value:
+            ok: true
+        failed:
+          value:
+            ok: false
+            error: apply failed
+    Profile:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        iface:
+          type: string
+        endpoint:
+          type: string
+        enabled:
+          type: string
+        status:
+          type: string
+        handshake_age:
+          type: string
+        address:
+          type: string
+        dns:
+          type: string
+        allowed_ips:
+          type: string
+        mtu:
+          type: string
+        persistent_keepalive:
+          type: string
+        public_key:
+          type: string
+      example:
+        id: vpn_sg_01
+        name: Singapore 01
+        iface: wg_vpnsg01
+        endpoint: 1.2.3.4:51820
+        enabled: '1'
+        status: healthy
+        handshake_age: '22'
+        address: 10.9.0.2/32
+        dns: 1.1.1.1
+        allowed_ips: 0.0.0.0/0,::/0
+        mtu: '1420'
+        persistent_keepalive: '25'
+        public_key: base64_public_key
+    ProfileUpsertRequest:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
         name:
           type: string
         endpoint_host:
           type: string
         endpoint_port:
-          type: integer
-        private_key:
           type: string
         public_key:
           type: string
+        private_key:
+          type: string
+        address:
+          type: string
+        dns:
+          type: string
         allowed_ips:
-          type: array
-          items:
-            type: string
-        kill_switch:
-          type: boolean
-    ProfileUpdate:
-      allOf:
-        - $ref: '#/components/schemas/ProfileCreate'
-    DevicePolicy:
+          type: string
+          description: Comma-separated CIDRs
+        mtu:
+          type: string
+        persistent_keepalive:
+          type: string
+        enabled:
+          type: string
+          enum: ['0', '1']
+        preshared_key:
+          type: string
+      example:
+        id: vpn_sg_01
+        name: Singapore 01
+        endpoint_host: 1.2.3.4
+        endpoint_port: '51820'
+        public_key: base64_pub
+        private_key: base64_priv
+        address: 10.9.0.2/32
+        dns: 1.1.1.1
+        allowed_ips: 0.0.0.0/0,::/0
+        mtu: '1420'
+        persistent_keepalive: '25'
+        enabled: '1'
+    Device:
       type: object
-      required: [mac, target]
       properties:
+        ip:
+          type: string
+        mac:
+          type: string
+        hostname:
+          type: string
+        state:
+          type: string
+        connected:
+          type: boolean
+      example:
+        ip: 192.168.1.195
+        mac: 1e:95:1c:4d:d5:ac
+        hostname: SM-S911B
+        state: reachable
+        connected: true
+    Policy:
+      type: object
+      properties:
+        section:
+          type: string
+        hostname:
+          type: string
         mac:
           type: string
         ip:
           type: string
-        hostname:
-          type: string
         target:
           type: string
-          description: wan or profile section id
-        enabled:
-          type: boolean
+      example:
+        section: policy_sm_s911b
+        hostname: SM-S911B
+        mac: 1e:95:1c:4d:d5:ac
+        ip: 192.168.1.195
+        target: vpn_sg_01

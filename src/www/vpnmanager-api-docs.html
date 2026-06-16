@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPN Manager API Docs</title>
+    <style>
+        :root {
+            --bg: #f5f7fb;
+            --card: #ffffff;
+            --ink: #1f2937;
+            --muted: #6b7280;
+            --line: #e5e7eb;
+            --accent: #0f766e;
+            --accent-2: #155e75;
+            --ok: #065f46;
+            --warn: #92400e;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 50%, #ecfeff 100%);
+            color: var(--ink);
+        }
+        .wrap { max-width: 1200px; margin: 0 auto; padding: 28px; }
+        .hero {
+            background: radial-gradient(circle at top right, #ccfbf1, #ffffff 55%);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            padding: 26px;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+        }
+        h1 { margin: 0 0 8px; font-size: 30px; }
+        h2 { margin: 0 0 12px; font-size: 22px; }
+        h3 { margin: 0 0 8px; font-size: 18px; }
+        p { margin: 0; color: var(--muted); }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+        }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 16px;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+        }
+        .chip {
+            display: inline-block;
+            background: #ccfbf1;
+            color: var(--accent);
+            border: 1px solid #99f6e4;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 4px 10px;
+            margin-right: 6px;
+            margin-bottom: 6px;
+        }
+        .chip.post { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
+        .chip.get { background: #dcfce7; border-color: #86efac; color: #166534; }
+        .chip.base { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+        .section { margin-top: 22px; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            background: #fff;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        th, td {
+            border-bottom: 1px solid var(--line);
+            text-align: left;
+            padding: 10px 12px;
+            vertical-align: top;
+        }
+        th { background: #f8fafc; font-weight: 700; }
+        tr:last-child td { border-bottom: none; }
+        code, pre {
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 12px;
+        }
+        pre {
+            background: #0b1020;
+            color: #dbe4ff;
+            border-radius: 10px;
+            padding: 12px;
+            overflow: auto;
+            line-height: 1.45;
+            border: 1px solid #1f2a44;
+        }
+        .note {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #fde68a;
+            background: #fffbeb;
+            color: var(--warn);
+            font-size: 13px;
+        }
+        .ok {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #86efac;
+            background: #f0fdf4;
+            color: var(--ok);
+            font-size: 13px;
+        }
+        .muted { color: var(--muted); font-size: 13px; }
+        .foot {
+            margin-top: 18px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="hero">
+            <h1>VPN Manager API Documentation</h1>
+            <p>Unified API for profile lifecycle, device VPN assignment, policy routing, WiFi binding, MultiEbay import, and transactional apply/rollback.</p>
+            <div style="margin-top:12px;">
+                <span class="chip base">Base Path: /cgi-bin/luci/admin/services/vpnmanager</span>
+                <span class="chip post">Write APIs use POST form fields</span>
+                <span class="chip get">Read APIs use GET</span>
+            </div>
+            <div class="note">Authentication follows LuCI session rules. Call these endpoints from a logged-in browser session, or include the proper LuCI auth context in automation.</div>
+            <div class="ok">Software mode (no LuCI login): use token-protected endpoints under /cgi-bin/luci/vpnmanager/api/v1 with header X-API-Key.</div>
+        </div>
+
+        <div class="section grid">
+            <div class="card">
+                <h3>Core Read APIs</h3>
+                <table>
+                    <thead>
+                        <tr><th>Method</th><th>Path</th><th>Purpose</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>GET</td><td>/profiles</td><td>List VPN profiles with status and handshake age.</td></tr>
+                        <tr><td>GET</td><td>/devices</td><td>List LAN devices from DHCP and ARP, including online state.</td></tr>
+                        <tr><td>GET</td><td>/policies</td><td>List per-device routing policies.</td></tr>
+                        <tr><td>GET</td><td>/status</td><td>Dashboard counters: healthy/down profiles.</td></tr>
+                        <tr><td>GET</td><td>/route_status</td><td>Route target and egress IP summary (cached for performance).</td></tr>
+                        <tr><td>GET</td><td>/audit</td><td>Latest audit log lines.</td></tr>
+                        <tr><td>GET</td><td>/wifi</td><td>Current WiFi base settings.</td></tr>
+                        <tr><td>GET</td><td>/wifi_bindings</td><td>Dedicated WiFi-over-VPN bindings.</td></tr>
+                        <tr><td>GET</td><td>/multiebay_settings</td><td>Saved MultiEbay settings (API key redacted status).</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>Core Write APIs</h3>
+                <table>
+                    <thead>
+                        <tr><th>Method</th><th>Path</th><th>Main fields</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>POST</td><td>/profile</td><td>id, name, endpoint_host, endpoint_port, public_key, private_key, address, dns, allowed_ips, mtu, persistent_keepalive, enabled, preshared_key</td></tr>
+                        <tr><td>POST</td><td>/profile_delete</td><td>id</td></tr>
+                        <tr><td>POST</td><td>/toggle</td><td>id, enabled</td></tr>
+                        <tr><td>POST</td><td>/test</td><td>id</td></tr>
+                        <tr><td>POST</td><td>/import</td><td>id + (path or content)</td></tr>
+                        <tr><td>POST</td><td>/policy</td><td>section, mac, ip, hostname, target (wan or profile id)</td></tr>
+                        <tr><td>POST</td><td>/policy_delete</td><td>section</td></tr>
+                        <tr><td>POST</td><td>/wifi_set</td><td>ssid, key, encryption, channel, enabled</td></tr>
+                        <tr><td>POST</td><td>/wifi_binding</td><td>id, ssid, key, encryption, target, enabled</td></tr>
+                        <tr><td>POST</td><td>/wifi_binding_delete</td><td>id</td></tr>
+                        <tr><td>POST</td><td>/multiebay_import</td><td>id, api_base, api_key, proxy_url, gateway_name, client_name, profile_name, allow_http_proxy</td></tr>
+                        <tr><td>POST</td><td>/multiebay_settings_save</td><td>api_base, api_key, allow_http_proxy</td></tr>
+                        <tr><td>POST</td><td>/multiebay_settings_clear</td><td>none</td></tr>
+                        <tr><td>POST</td><td>/apply</td><td>none</td></tr>
+                        <tr><td>POST</td><td>/rollback</td><td>none</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section card">
+            <h2>Quick Workflow: Assign VPN To A Device</h2>
+            <p class="muted">This is the most common full-feature use case: import profile, bind device policy, verify route, then apply.</p>
+            <pre># 1) Import a WireGuard profile by raw config content
+curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/import" \
+  --data-urlencode "id=vpn_sg_01" \
+  --data-urlencode "content=[Interface]
+PrivateKey=...
+Address=10.0.0.2/32
+DNS=1.1.1.1
+[Peer]
+PublicKey=...
+AllowedIPs=0.0.0.0/0,::/0
+Endpoint=1.2.3.4:51820"
+
+# 2) Assign one device to that VPN profile
+curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/policy" \
+  --data-urlencode "section=policy_sm_s911b" \
+  --data-urlencode "hostname=SM-S911B" \
+  --data-urlencode "mac=1e:95:1c:4d:d5:ac" \
+  --data-urlencode "ip=192.168.1.195" \
+  --data-urlencode "target=vpn_sg_01"
+
+# 3) Validate route status and profile health
+curl -s "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/route_status"
+curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/test" \
+  --data-urlencode "id=vpn_sg_01"
+
+# 4) Apply staged changes atomically
+curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/apply"</pre>
+            <div class="ok">Best practice: use stable policy section ids and keep MAC + IP together. The backend deduplicates policy conflicts by MAC/IP automatically.</div>
+        </div>
+
+        <div class="section card">
+            <h2>Response Examples</h2>
+            <div class="grid">
+                <div>
+                    <h3>GET /profiles</h3>
+                    <pre>{
+  "profiles": [
+    {
+      "id": "vpn_sg_01",
+      "name": "Singapore 01",
+      "iface": "wg_vpnsg01",
+      "endpoint": "1.2.3.4:51820",
+      "enabled": "1",
+      "status": "healthy",
+      "handshake_age": "23"
+    }
+  ]
+}</pre>
+                </div>
+                <div>
+                    <h3>POST /policy</h3>
+                    <pre>{
+  "ok": true
+}</pre>
+                    <h3 style="margin-top:10px;">POST /test</h3>
+                    <pre>{
+  "ok": true,
+  "state": "healthy",
+  "latency": "n/a"
+}</pre>
+                </div>
+            </div>
+        </div>
+
+        <div class="section card">
+            <h2>Error Model</h2>
+            <table>
+                <thead>
+                    <tr><th>Pattern</th><th>Meaning</th><th>Action</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>{"ok":false,"error":"missing args"}</td><td>Required form fields are missing</td><td>Validate required request fields client side before submit</td></tr>
+                    <tr><td>{"ok":false,"error":"profile not found"}</td><td>Target profile id does not exist</td><td>Refresh profiles and retry with a valid id</td></tr>
+                    <tr><td>{"ok":false,"error":"apply failed"}</td><td>Reconcile stage failed</td><td>Check audit log, fix config, or call rollback</td></tr>
+                    <tr><td>{"error":"unsupported method"}</td><td>Wrong endpoint mapping to rpcd action</td><td>Use exact path listed in docs</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+                <div class="section card">
+                        <h2>Detailed Endpoint Examples</h2>
+                        <p class="muted">Request and response samples below use real payload shape from current LuCI controller and rpcd backend.</p>
+
+                        <h3 style="margin-top:12px;">Software API without LuCI session</h3>
+                        <pre># Configure key once on router
+uci -q set vpn-manager.global=vpn-manager
+uci set vpn-manager.global.software_api_key='YOUR_STRONG_KEY'
+uci commit vpn-manager
+/etc/init.d/rpcd restart
+/etc/init.d/uhttpd restart
+
+# Read devices
+curl -s -H "Authorization: Bearer YOUR_STRONG_KEY" \
+    "http://192.168.1.1/cgi-bin/luci/vpnmanager/api/v1/devices"
+
+# If custom header is stripped by HTTP stack, use query fallback
+curl -s "http://192.168.1.1/cgi-bin/luci/vpnmanager/api/v1/devices?api_key=YOUR_STRONG_KEY"
+
+# Set policy (device -> VPN profile)
+curl -s -X POST -H "Authorization: Bearer YOUR_STRONG_KEY" \
+    "http://192.168.1.1/cgi-bin/luci/vpnmanager/api/v1/policy" \
+    --data-urlencode "section=policy_sm_s911b" \
+    --data-urlencode "hostname=SM-S911B" \
+    --data-urlencode "mac=1e:95:1c:4d:d5:ac" \
+    --data-urlencode "ip=192.168.1.195" \
+    --data-urlencode "target=vpn_sg_01"</pre>
+                        <pre>{
+    "ok": false,
+    "error": "invalid api key"
+}</pre>
+
+                        <h3 style="margin-top:12px;">POST /profile</h3>
+                        <pre>curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/profile" \
+    --data-urlencode "id=vpn_sg_01" \
+    --data-urlencode "name=Singapore 01" \
+    --data-urlencode "endpoint_host=1.2.3.4" \
+    --data-urlencode "endpoint_port=51820" \
+    --data-urlencode "public_key=base64_pub" \
+    --data-urlencode "private_key=base64_priv" \
+    --data-urlencode "address=10.9.0.2/32" \
+    --data-urlencode "dns=1.1.1.1" \
+    --data-urlencode "allowed_ips=0.0.0.0/0,::/0" \
+    --data-urlencode "enabled=1"</pre>
+                        <pre>{
+    "ok": true
+}</pre>
+
+                        <h3 style="margin-top:12px;">POST /policy</h3>
+                        <pre>curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/policy" \
+    --data-urlencode "section=policy_sm_s911b" \
+    --data-urlencode "hostname=SM-S911B" \
+    --data-urlencode "mac=1e:95:1c:4d:d5:ac" \
+    --data-urlencode "ip=192.168.1.195" \
+    --data-urlencode "target=vpn_sg_01"</pre>
+                        <pre>{
+    "ok": true
+}</pre>
+                        <pre>{
+    "ok": false,
+    "error": "target profile not found: vpn_unknown"
+}</pre>
+
+                        <h3 style="margin-top:12px;">GET /devices</h3>
+                        <pre>{
+    "devices": [
+        {
+            "ip": "192.168.1.195",
+            "mac": "1e:95:1c:4d:d5:ac",
+            "hostname": "SM-S911B",
+            "state": "reachable",
+            "connected": true
+        },
+        {
+            "ip": "192.168.1.148",
+            "mac": "ce:e3:25:eb:33:20",
+            "hostname": "unknown",
+            "state": "stale",
+            "connected": false
+        }
+    ]
+}</pre>
+
+                        <h3 style="margin-top:12px;">POST /import</h3>
+                        <pre>curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/import" \
+    --data-urlencode "id=vpn_text_01" \
+    --data-urlencode "content=[Interface]\nPrivateKey=...\nAddress=10.0.0.2/32\nDNS=1.1.1.1\n[Peer]\nPublicKey=...\nAllowedIPs=0.0.0.0/0\nEndpoint=1.2.3.4:51820"</pre>
+                        <pre>{
+    "ok": true
+}</pre>
+                        <pre>{
+    "ok": false,
+    "error": "conf file not found"
+}</pre>
+
+                        <h3 style="margin-top:12px;">POST /multiebay_import</h3>
+                        <pre>curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/multiebay_import" \
+    --data-urlencode "id=vpn_me_01" \
+    --data-urlencode "api_base=https://multiebay.com" \
+    --data-urlencode "api_key=YOUR_KEY" \
+    --data-urlencode "proxy_url=socks5://user:pass@host:port" \
+    --data-urlencode "profile_name=ME SG 01" \
+    --data-urlencode "allow_http_proxy=1"</pre>
+                        <pre>{
+    "ok": true,
+    "id": "vpn_me_01",
+    "gateway_name": "gw_123",
+    "wg_name": "wg_client_123"
+}</pre>
+                        <pre>{
+    "ok": false,
+    "error": "unable to validate MultiEbay API key"
+}</pre>
+
+                        <h3 style="margin-top:12px;">GET /status and GET /route_status</h3>
+                        <pre>{
+    "up": 5,
+    "down": 1,
+    "timestamp": "2026-06-16T16:00:00Z"
+}</pre>
+                        <pre>{
+    "wan": {
+        "public_ip": "203.0.113.10",
+        "country": "US",
+        "ok": true
+    },
+    "vpn_sg_01": {
+        "public_ip": "64.29.86.94",
+        "country": "SG",
+        "ok": true
+    }
+}</pre>
+                </div>
+
+        <div class="foot">
+            Version: API docs aligned with current rpcd methods in /usr/libexec/rpcd/vpn-manager and LuCI controller mappings.
+        </div>
+    </div>
+</body>
+</html>

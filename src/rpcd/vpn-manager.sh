@@ -325,6 +325,52 @@ clear_multiebay_api_key() {
     echo '{"ok":true}'
 }
 
+list_software_api_settings() {
+    vm_global_ensure
+    api_key="$(vm_global_get software_api_key)"
+    api_key_saved="false"
+    [ -n "$api_key" ] && api_key_saved="true"
+
+    printf '{"ok":true,"api_key_saved":%s,"api_key":"%s"}' \
+        "$api_key_saved" \
+        "$(json_escape "$api_key")"
+}
+
+save_software_api_key() {
+    api_key="$2"
+
+    vm_global_ensure
+    [ -n "$api_key" ] || {
+        echo '{"ok":false,"error":"api key is required"}'
+        return
+    }
+
+    vm_global_set software_api_key "$api_key"
+    uci commit vpn-manager
+    echo '{"ok":true}'
+}
+
+clear_software_api_key() {
+    vm_global_ensure
+    uci -q delete vpn-manager.global.software_api_key
+    uci commit vpn-manager
+    echo '{"ok":true}'
+}
+
+rotate_software_api_key() {
+    vm_global_ensure
+
+    new_key="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40)"
+    [ -n "$new_key" ] || {
+        echo '{"ok":false,"error":"unable to generate api key"}'
+        return
+    }
+
+    vm_global_set software_api_key "$new_key"
+    uci commit vpn-manager
+    printf '{"ok":true,"api_key":"%s"}' "$(json_escape "$new_key")"
+}
+
 lookup_public_ip() {
     iface="$1"
     if [ -n "$iface" ]; then
@@ -1232,6 +1278,10 @@ case "$1" in
     list_multiebay_settings) list_multiebay_settings ;;
     save_multiebay_settings) save_multiebay_settings "$@" ;;
     clear_multiebay_api_key) clear_multiebay_api_key ;;
+    list_software_api_settings) list_software_api_settings ;;
+    save_software_api_key) save_software_api_key "$@" ;;
+    clear_software_api_key) clear_software_api_key ;;
+    rotate_software_api_key) rotate_software_api_key ;;
     create_multiebay_profile) create_multiebay_profile "$@" ;;
     apply) apply_changes ;;
     rollback) rollback_changes ;;
