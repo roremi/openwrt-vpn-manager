@@ -8,6 +8,55 @@ json_escape() {
     echo "$1" | sed 's/"/\\"/g'
 }
 
+vm_ensure_jq() {
+    if command -v jq >/dev/null 2>&1; then
+        return 0
+    fi
+
+    vm_init_dirs
+    jq_dir="$VM_STATE_DIR/bin"
+    jq_bin="$jq_dir/jq"
+    mkdir -p "$jq_dir"
+
+    if [ -x "$jq_bin" ]; then
+        PATH="$jq_dir:$PATH"
+        export PATH
+        return 0
+    fi
+
+    vm_require_cmd curl >/dev/null 2>&1 || return 1
+
+    arch="$(uname -m 2>/dev/null || echo unknown)"
+    case "$arch" in
+        aarch64|arm64) jq_asset="jq-linux-arm64" ;;
+        armv7l|armv7|armhf) jq_asset="jq-linux-armel" ;;
+        x86_64|amd64) jq_asset="jq-linux-amd64" ;;
+        *) return 1 ;;
+    esac
+
+    jq_url="https://github.com/jqlang/jq/releases/download/jq-1.7.1/$jq_asset"
+    jq_tmp="$jq_bin.tmp.$$"
+
+    rm -f "$jq_tmp"
+    if ! curl -fsSL --connect-timeout 8 --max-time 60 -o "$jq_tmp" "$jq_url"; then
+        rm -f "$jq_tmp"
+        return 1
+    fi
+
+    chmod +x "$jq_tmp" || {
+        rm -f "$jq_tmp"
+        return 1
+    }
+    mv "$jq_tmp" "$jq_bin" || {
+        rm -f "$jq_tmp"
+        return 1
+    }
+
+    PATH="$jq_dir:$PATH"
+    export PATH
+    jq --version >/dev/null 2>&1
+}
+
 http_json_request() {
     method="$1"
     url="$2"
@@ -58,6 +107,7 @@ http_json_request() {
 
 multiebay_pick_gateway_name() {
     jq -r '[
+        .gateway,
         .name,
         (.id | tostring?),
         .gateway_id,
@@ -224,6 +274,58 @@ multiebay_lookup_gateway_by_hostport_unique() {
     | map(select(type == "string" and length > 0))
     | unique
     | if length == 1 then .[0] else "" end' 2>/dev/null
+}
+
+# Pick new gateway by comparing proxy_url field between before/after lists.
+# More reliable than name-diff when API reuses names.
+multiebay_pick_new_gateway_by_proxy_url() {
+    before_json="$1"
+    after_json="$2"
+    proxy_url="$3"
+
+    # Step 1: find gateways in after whose proxy_url matches and were NOT in before.
+    jq -nr \
+        --argjson before "${before_json:-[]}" \
+        --argjson after "${after_json:-[]}" \
+        --arg proxy "$proxy_url" \
+        '
+        def items($doc):
+            [
+                $doc.proxies[]?,
+                $doc.items[]?,
+                $doc.data[]?,
+                $doc.gateways[]?
+            ];
+        def nameOf($o): ($o.name // $o.gateway_name // $o.gatewayName // $o.gateway.name // ($o.id|tostring?) // "");
+        def proxyOf($o): ($o.proxy_url // $o.proxy // $o.upstream // $o.url // "");
+
+        (items($before) | map(nameOf(.)) | unique) as $before_names |
+        [
+            items($after)
+            | select(
+                (proxyOf(.) | . != "" and (. == $proxy or contains($proxy[-20:])))
+                and ((nameOf(.)) as $n | ($before_names | index($n)) == null)
+              )
+            | nameOf(.)
+            | select(type == "string" and length > 0)
+        ] | unique | .[0] // ""
+        ' 2>/dev/null
+}
+
+# Last resort: pick the most recently created gateway by created_at timestamp.
+# Reliable because the just-created gateway will always have the newest timestamp,
+# regardless of how the API structures its proxy_url/proxy_display fields.
+multiebay_pick_newest_gateway_by_created_at() {
+    proxies_json="$1"
+    printf '%s' "$proxies_json" | jq -r '
+        [
+            (.proxies[]?, .items[]?, .data[]?, .gateways[]?)
+            | select(.created_at? // .createdAt? // .created? | type == "string")
+        ]
+        | sort_by(.created_at // .createdAt // .created)
+        | last
+        | (.name // .gateway_name // .gatewayName // (.id|tostring?) // "")
+    ' 2>/dev/null
 }
 
 urlencode() {
@@ -1169,8 +1271,8 @@ create_multiebay_profile() {
         echo '{"ok":false,"error":"missing command: curl"}'
         return
     }
-    vm_require_cmd jq >/dev/null 2>&1 || {
-        echo '{"ok":false,"error":"missing command: jq"}'
+    vm_ensure_jq >/dev/null 2>&1 || {
+        echo '{"ok":false,"error":"missing command: jq (auto-download failed)"}'
         return
     }
 
@@ -1201,6 +1303,8 @@ create_multiebay_profile() {
         proxy_payload="$(jq -cn --arg proxy_url "$proxy_url" --argjson allow_http_proxy "$allow_http_proxy_json" '{proxy_url:$proxy_url, allow_http_proxy:$allow_http_proxy}')"
         gateway_resp="$(http_json_request "POST" "$api_base/api/customer/proxy" "$api_key" "$proxy_payload" 2>/dev/null || true)"
         gateway_name="$(printf '%s' "$gateway_resp" | multiebay_pick_gateway_name)"
+        # Small delay to allow the API to register the newly created gateway.
+        [ -n "$gateway_name" ] || sleep 1
 
         if [ -z "$gateway_name" ]; then
             proxies_resp="$(http_json_request "GET" "$api_base/api/customer/proxies" "$api_key" 2>/dev/null || true)"
@@ -1213,6 +1317,16 @@ create_multiebay_profile() {
 
         if [ -z "$gateway_name" ]; then
             gateway_name="$(printf '%s' "$proxies_resp" | multiebay_lookup_gateway_by_hostport_unique "$proxy_url")"
+        fi
+
+        # Fallback: diff by proxy_url field between before/after lists.
+        if [ -z "$gateway_name" ]; then
+            gateway_name="$(multiebay_pick_new_gateway_by_proxy_url "$proxies_before" "$proxies_resp" "$proxy_url")"
+        fi
+
+        # Last resort: take the gateway with the most recent created_at (just created).
+        if [ -z "$gateway_name" ]; then
+            gateway_name="$(multiebay_pick_newest_gateway_by_created_at "$proxies_resp")"
         fi
 
         if [ -z "$gateway_name" ]; then
