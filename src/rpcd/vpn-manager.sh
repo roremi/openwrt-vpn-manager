@@ -378,6 +378,41 @@ multiebay_proxy_to_url() {
     return 1
 }
 
+multiebay_switch_proxy_scheme() {
+    url="$1"
+    case "$url" in
+        socks5://*) echo "http://${url#socks5://}" ;;
+        http://*) echo "socks5://${url#http://}" ;;
+        *) echo "$url" ;;
+    esac
+}
+
+multiebay_proxy_candidates() {
+    raw="$1"
+    normalized="$2"
+
+    case "$raw" in
+        *://*)
+            printf '%s\n' "$normalized"
+            ;;
+        *)
+            alt="$(multiebay_switch_proxy_scheme "$normalized")"
+            printf '%s\n' "$normalized"
+            [ "$alt" != "$normalized" ] && printf '%s\n' "$alt"
+            ;;
+    esac
+}
+
+multiebay_create_gateway() {
+    api_base="$1"
+    api_key="$2"
+    proxy_url="$3"
+    allow_http_proxy_json="$4"
+
+    payload="$(jq -cn --arg proxy_url "$proxy_url" --argjson allow_http_proxy "$allow_http_proxy_json" '{proxy_url:$proxy_url, allow_http_proxy:$allow_http_proxy}')"
+    http_json_request "POST" "$api_base/api/customer/proxy" "$api_key" "$payload"
+}
+
 multiebay_proxy_host() {
     proxy_url="$1"
     echo "$proxy_url" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#^[^@]+@##; s#[:/].*$##'
@@ -1232,6 +1267,7 @@ create_multiebay_profile() {
     sec="$2"
     api_base="$3"
     api_key="$4"
+    proxy_input="$5"
     proxy_url="$5"
     gateway_name="$6"
     client_name="$7"
@@ -1242,20 +1278,6 @@ create_multiebay_profile() {
     [ -n "$api_base" ] || api_base="$(vm_global_get multiebay_api_base)"
     [ -n "$api_key" ] || api_key="$(vm_global_get multiebay_api_key)"
     [ -n "$allow_http_proxy" ] || allow_http_proxy="$(vm_global_get multiebay_allow_http_proxy)"
-
-    if [ -n "$proxy_url" ]; then
-        proxy_url="$(multiebay_proxy_to_url "$proxy_url" 2>/dev/null || true)"
-        [ -n "$proxy_url" ] || {
-            echo '{"ok":false,"error":"unsupported proxy format; use ip:port:user:pass or socks5://user:pass@host:port"}'
-            return
-        }
-    fi
-
-    if [ -z "$sec" ]; then
-        seed_host="$(multiebay_slug "$(multiebay_proxy_host "$proxy_url")")"
-        [ -n "$seed_host" ] || seed_host="proxy"
-        sec="vpn_${seed_host}_$(date +%H%M%S)"
-    fi
 
     [ -n "$api_key" ] || {
         echo '{"ok":false,"error":"missing api key"}'
@@ -1275,6 +1297,20 @@ create_multiebay_profile() {
         echo '{"ok":false,"error":"missing command: jq (auto-download failed)"}'
         return
     }
+
+    if [ -n "$proxy_url" ]; then
+        proxy_url="$(multiebay_proxy_to_url "$proxy_url" 2>/dev/null || true)"
+        [ -n "$proxy_url" ] || {
+            echo '{"ok":false,"error":"unsupported proxy format; use ip:port:user:pass or socks5://user:pass@host:port"}'
+            return
+        }
+    fi
+
+    if [ -z "$sec" ]; then
+        seed_host="$(multiebay_slug "$(multiebay_proxy_host "$proxy_url")")"
+        [ -n "$seed_host" ] || seed_host="proxy"
+        sec="vpn_${seed_host}_$(date +%H%M%S)"
+    fi
 
     api_base="${api_base%/}"
     [ -n "$api_base" ] || api_base="https://multiebay.com"
@@ -1300,33 +1336,43 @@ create_multiebay_profile() {
         fi
     elif [ -z "$gateway_name" ]; then
         proxies_before="$(http_json_request "GET" "$api_base/api/customer/proxies" "$api_key" 2>/dev/null || true)"
-        proxy_payload="$(jq -cn --arg proxy_url "$proxy_url" --argjson allow_http_proxy "$allow_http_proxy_json" '{proxy_url:$proxy_url, allow_http_proxy:$allow_http_proxy}')"
-        gateway_resp="$(http_json_request "POST" "$api_base/api/customer/proxy" "$api_key" "$proxy_payload" 2>/dev/null || true)"
+        gateway_resp=""
+        gateway_errs=""
+        created_proxy_url=""
+
+        for candidate_proxy in $(multiebay_proxy_candidates "$proxy_input" "$proxy_url"); do
+            if candidate_resp="$(multiebay_create_gateway "$api_base" "$api_key" "$candidate_proxy" "$allow_http_proxy_json" 2>&1)"; then
+                gateway_resp="$candidate_resp"
+                created_proxy_url="$candidate_proxy"
+                break
+            fi
+            if [ -n "$gateway_errs" ]; then
+                gateway_errs="$gateway_errs; $candidate_proxy => $candidate_resp"
+            else
+                gateway_errs="$candidate_proxy => $candidate_resp"
+            fi
+        done
+
+        [ -n "$gateway_resp" ] || {
+            printf '{"ok":false,"error":"unable to create MultiEbay gateway: %s"}' "$(json_escape "$gateway_errs")"
+            return
+        }
+
+        proxy_url="$created_proxy_url"
         gateway_name="$(printf '%s' "$gateway_resp" | multiebay_pick_gateway_name)"
         # Small delay to allow the API to register the newly created gateway.
         [ -n "$gateway_name" ] || sleep 1
 
         if [ -z "$gateway_name" ]; then
-            proxies_resp="$(http_json_request "GET" "$api_base/api/customer/proxies" "$api_key" 2>/dev/null || true)"
-            gateway_name="$(multiebay_pick_new_gateway_from_lists "$proxies_before" "$proxies_resp")"
-        fi
-
-        if [ -z "$gateway_name" ]; then
-            gateway_name="$(printf '%s' "$proxies_resp" | multiebay_lookup_gateway_by_proxy "$proxy_url")"
-        fi
-
-        if [ -z "$gateway_name" ]; then
-            gateway_name="$(printf '%s' "$proxies_resp" | multiebay_lookup_gateway_by_hostport_unique "$proxy_url")"
-        fi
-
-        # Fallback: diff by proxy_url field between before/after lists.
-        if [ -z "$gateway_name" ]; then
-            gateway_name="$(multiebay_pick_new_gateway_by_proxy_url "$proxies_before" "$proxies_resp" "$proxy_url")"
-        fi
-
-        # Last resort: take the gateway with the most recent created_at (just created).
-        if [ -z "$gateway_name" ]; then
-            gateway_name="$(multiebay_pick_newest_gateway_by_created_at "$proxies_resp")"
+            for _ in 1 2 3; do
+                proxies_resp="$(http_json_request "GET" "$api_base/api/customer/proxies" "$api_key" 2>/dev/null || true)"
+                gateway_name="$(multiebay_pick_new_gateway_from_lists "$proxies_before" "$proxies_resp")"
+                [ -n "$gateway_name" ] || gateway_name="$(printf '%s' "$proxies_resp" | multiebay_lookup_gateway_by_proxy "$proxy_url")"
+                [ -n "$gateway_name" ] || gateway_name="$(printf '%s' "$proxies_resp" | multiebay_lookup_gateway_by_hostport_unique "$proxy_url")"
+                [ -n "$gateway_name" ] || gateway_name="$(multiebay_pick_new_gateway_by_proxy_url "$proxies_before" "$proxies_resp" "$proxy_url")"
+                [ -n "$gateway_name" ] && break
+                sleep 1
+            done
         fi
 
         if [ -z "$gateway_name" ]; then
