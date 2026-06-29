@@ -124,6 +124,10 @@ EOF
                 fi
             fi
 
+            # IPv4-only tunnels: hard-drop client IPv6 forwarding so a native IPv6
+            # path can never leak the real address past the VPN.
+            [ -n "$mac" ] && echo "add rule inet vpn_manager_strict forward iifname \"br-lan\" ether saddr $mac meta nfproto ipv6 drop" >> "$VM_NFT_STRICT_FILE"
+
         fi
 
         # Pin DNS of routed clients to the target DNS to avoid dnsmasq upstream leakage.
@@ -158,7 +162,7 @@ EOF
         fi
     done
 
-    local wifi_sec wifi_target wifi_subnet_id wifi_subnet_cidr
+    local wifi_sec wifi_target wifi_subnet_id wifi_subnet_cidr wifi_network
     for wifi_sec in $(vm_wifi_binding_list); do
         [ "$(uci -q get vpn-manager.$wifi_sec.enabled)" = "1" ] || continue
 
@@ -182,6 +186,14 @@ EOF
         nat_ifaces="$nat_ifaces $iface"
         echo "add rule inet vpn_manager_strict forward ip saddr $wifi_subnet_cidr oifname != \"$iface\" drop" >> "$VM_NFT_STRICT_FILE"
         echo "add rule inet vpn_manager_strict forward ip saddr $wifi_subnet_cidr oifname \"$iface\" accept" >> "$VM_NFT_STRICT_FILE"
+
+        # IPv4-only tunnels: hard-drop all IPv6 from a VPN-bound SSID bridge so the
+        # dedicated WiFi cannot leak a native IPv6 address around the tunnel.
+        if [ "$wifi_target" != "wan" ]; then
+            wifi_network="$(uci -q get vpn-manager.$wifi_sec.network)"
+            [ -n "$wifi_network" ] || wifi_network="$wifi_sec"
+            echo "add rule inet vpn_manager_strict forward iifname \"br-$wifi_network\" meta nfproto ipv6 drop" >> "$VM_NFT_STRICT_FILE"
+        fi
 
         if echo "$dns_ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "add rule ip vpn_manager_dns prerouting ip saddr $wifi_subnet_cidr udp dport 53 dnat to $dns_ip" >> "$VM_NFT_DNS_FILE"
