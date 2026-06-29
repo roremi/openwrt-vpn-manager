@@ -221,8 +221,23 @@ EOF
         # accepts (e.g. dedicated WiFi). Avoids PMTUD black-holes and stops the
         # fixed WireGuard MTU from emitting oversized segments that fingerprint
         # the link as tunneled.
-        echo "add rule inet vpn_manager_strict mangle_mss oifname \"$iface\" tcp flags syn tcp option maxseg size set rt mtu" >> "$VM_NFT_STRICT_FILE"
-        echo "add rule inet vpn_manager_strict mangle_mss iifname \"$iface\" tcp flags syn tcp option maxseg size set rt mtu" >> "$VM_NFT_STRICT_FILE"
+        #
+        # Clamp BOTH directions to the egress iface MTU minus the IPv4+TCP header
+        # (40B). `rt mtu` alone is wrong for the ingress (iifname) rule: a SYN-ACK
+        # arriving from the tunnel is routed onward to the LAN, so `rt mtu`
+        # resolves to the LAN route (1500) and advertises an MSS the client cannot
+        # actually push back through the 1280B tunnel -> oversized client->server
+        # segments get black-holed (HTTP/2 stalls, ERR_HTTP2_PROTOCOL_ERROR).
+        local iface_mtu iface_mss
+        iface_mtu="$(cat "/sys/class/net/$iface/mtu" 2>/dev/null)"
+        if [ -n "$iface_mtu" ] && [ "$iface_mtu" -ge 576 ]; then
+            iface_mss=$((iface_mtu - 40))
+            echo "add rule inet vpn_manager_strict mangle_mss oifname \"$iface\" tcp flags syn tcp option maxseg size set $iface_mss" >> "$VM_NFT_STRICT_FILE"
+            echo "add rule inet vpn_manager_strict mangle_mss iifname \"$iface\" tcp flags syn tcp option maxseg size set $iface_mss" >> "$VM_NFT_STRICT_FILE"
+        else
+            echo "add rule inet vpn_manager_strict mangle_mss oifname \"$iface\" tcp flags syn tcp option maxseg size set rt mtu" >> "$VM_NFT_STRICT_FILE"
+            echo "add rule inet vpn_manager_strict mangle_mss iifname \"$iface\" tcp flags syn tcp option maxseg size set rt mtu" >> "$VM_NFT_STRICT_FILE"
+        fi
     done
 
     nft -c -f "$VM_NFT_STRICT_FILE" || vm_fail "nft strict validation failed"
