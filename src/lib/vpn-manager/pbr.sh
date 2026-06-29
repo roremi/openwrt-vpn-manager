@@ -92,6 +92,9 @@ table inet vpn_manager_strict {
     chain forward {
         type filter hook forward priority -200; policy accept;
     }
+    chain mangle_mss {
+        type filter hook forward priority mangle; policy accept;
+    }
 }
 EOF
 
@@ -192,10 +195,25 @@ EOF
         fi
     done
 
+    local seen_ifaces=""
     for iface in $nat_ifaces; do
+        case " $seen_ifaces " in
+            *" $iface "*) continue ;;
+        esac
+        seen_ifaces="$seen_ifaces $iface"
+
         echo "add rule ip vpn_manager_nat postrouting oifname \"$iface\" masquerade" >> "$VM_NFT_NAT_FILE"
+
+        # MSS clamp to path MTU on TCP SYN crossing the tunnel. Runs in its own
+        # base chain so it still applies to flows the strict chain terminally
+        # accepts (e.g. dedicated WiFi). Avoids PMTUD black-holes and stops the
+        # fixed WireGuard MTU from emitting oversized segments that fingerprint
+        # the link as tunneled.
+        echo "add rule inet vpn_manager_strict mangle_mss oifname \"$iface\" tcp flags syn tcp option maxseg size set rt mtu" >> "$VM_NFT_STRICT_FILE"
+        echo "add rule inet vpn_manager_strict mangle_mss iifname \"$iface\" tcp flags syn tcp option maxseg size set rt mtu" >> "$VM_NFT_STRICT_FILE"
     done
 
+    nft -c -f "$VM_NFT_STRICT_FILE" || vm_fail "nft strict validation failed"
     nft -c -f "$VM_NFT_FILE" || vm_fail "nft validation failed"
     nft -c -f "$VM_NFT_NAT_FILE" || vm_fail "nft nat validation failed"
     nft -c -f "$VM_NFT_DNS_FILE" || vm_fail "nft dns validation failed"
