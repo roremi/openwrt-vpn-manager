@@ -980,6 +980,78 @@ list_policies() {
     printf ']}'
 }
 
+list_blocked_domains() {
+    printf '{"ok":true,"domains":['
+    first=1
+    for sec in $(vm_blocked_domain_list); do
+        [ $first -eq 1 ] || printf ','
+        first=0
+        printf '{"id":"%s","domain":"%s","mode":"%s","enabled":"%s"}' \
+            "$sec" \
+            "$(json_escape "$(uci -q get vpn-manager.$sec.domain)")" \
+            "$(json_escape "$(uci -q get vpn-manager.$sec.mode)")" \
+            "$(uci -q get vpn-manager.$sec.enabled)"
+    done
+    printf ']}'
+}
+
+vm_block_slug() {
+    printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//' | cut -c1-32
+}
+
+save_blocked_domain() {
+    sec="$2"
+    domain="$3"
+    mode="$4"
+    enabled="$5"
+
+    domain="$(printf '%s' "$domain" | tr 'A-Z' 'a-z' | tr -d ' \t\r\n' | sed -E 's#^[a-z][a-z0-9+.-]*://##; s#/.*$##; s#\?.*$##; s#^[^@]*@##; s#:[0-9]+$##; s#^\*\.##; s#^\.+##; s#\.+$##')"
+
+    [ -n "$domain" ] || {
+        echo '{"ok":false,"error":"domain is required"}'
+        return
+    }
+    echo "$domain" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' || {
+        echo '{"ok":false,"error":"invalid domain"}'
+        return
+    }
+
+    case "$mode" in
+        exact) : ;;
+        *) mode="wildcard" ;;
+    esac
+    [ "$enabled" = "0" ] && enabled="0" || enabled="1"
+
+    [ -n "$sec" ] || sec="blk_$(vm_block_slug "$domain")"
+
+    uci set "vpn-manager.$sec=blocked_domain"
+    uci set "vpn-manager.$sec.domain=$domain"
+    uci set "vpn-manager.$sec.mode=$mode"
+    uci set "vpn-manager.$sec.enabled=$enabled"
+    uci commit vpn-manager
+
+    if /usr/libexec/vpn-manager/reconcile.sh >/dev/null 2>&1; then
+        printf '{"ok":true,"id":"%s"}' "$(json_escape "$sec")"
+    else
+        echo '{"ok":false,"error":"apply failed"}'
+    fi
+}
+
+delete_blocked_domain() {
+    sec="$2"
+    [ -n "$sec" ] || {
+        echo '{"ok":false,"error":"missing section"}'
+        return
+    }
+    vm_blocked_domain_exists "$sec" || {
+        echo '{"ok":false,"error":"blocked domain not found"}'
+        return
+    }
+    uci -q delete "vpn-manager.$sec"
+    uci commit vpn-manager
+    /usr/libexec/vpn-manager/reconcile.sh >/dev/null 2>&1 || true
+    echo '{"ok":true}'
+}
 status() {
     up=0
     down=0
@@ -1434,6 +1506,9 @@ case "$1" in
     list_wifi_bindings) list_wifi_bindings ;;
     save_wifi_binding) save_wifi_binding "$@" ;;
     delete_wifi_binding) delete_wifi_binding "$@" ;;
+    list_blocked_domains) list_blocked_domains ;;
+    save_blocked_domain) save_blocked_domain "$@" ;;
+    delete_blocked_domain) delete_blocked_domain "$@" ;;
     route_status) route_status ;;
     list_multiebay_settings) list_multiebay_settings ;;
     save_multiebay_settings) save_multiebay_settings "$@" ;;

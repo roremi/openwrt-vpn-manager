@@ -6,7 +6,7 @@ USE_PROCD=1
 
 start_service() {
     procd_open_instance
-    procd_set_param command /bin/sh -c '/usr/libexec/vpn-manager/reconcile.sh; while true; do /usr/libexec/vpn-manager/healthcheck.sh; /usr/libexec/vpn-manager/watchdog.sh; sleep 20; done'
+    procd_set_param command /bin/sh -c '/usr/libexec/vpn-manager/reconcile.sh; i=0; while true; do /usr/libexec/vpn-manager/healthcheck.sh; /usr/libexec/vpn-manager/watchdog.sh; i=$((i+1)); [ $((i % 90)) -eq 0 ] && /usr/libexec/vpn-manager/block-refresh.sh; sleep 20; done'
     procd_set_param respawn 3600 5 5
     procd_close_instance
 }

@@ -25,6 +25,9 @@ function index()
     entry({"admin", "services", "vpnmanager", "wifi_bindings"}, call("rpc_wifi_bindings")).leaf = true
     entry({"admin", "services", "vpnmanager", "wifi_binding"}, call("rpc_wifi_binding")).leaf = true
     entry({"admin", "services", "vpnmanager", "wifi_binding_delete"}, call("rpc_wifi_binding_delete")).leaf = true
+    entry({"admin", "services", "vpnmanager", "blocked_domains"}, call("rpc_blocked_domains")).leaf = true
+    entry({"admin", "services", "vpnmanager", "blocked_domain_save"}, call("rpc_blocked_domain_save")).leaf = true
+    entry({"admin", "services", "vpnmanager", "blocked_domain_delete"}, call("rpc_blocked_domain_delete")).leaf = true
     entry({"admin", "services", "vpnmanager", "route_status"}, call("rpc_route_status")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings"}, call("rpc_multiebay_settings")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings_save"}, call("rpc_multiebay_settings_save")).leaf = true
@@ -311,6 +314,23 @@ end
 
 function rpc_route_status()
     run_rpc("route_status")
+end
+
+function rpc_blocked_domains()
+    run_rpc("list_blocked_domains")
+end
+
+function rpc_blocked_domain_save()
+    local id = luci.http.formvalue("id") or ""
+    local domain = luci.http.formvalue("domain") or ""
+    local mode = luci.http.formvalue("mode") or "wildcard"
+    local enabled = luci.http.formvalue("enabled") or "1"
+    run_rpc("save_blocked_domain " .. sq(id) .. " " .. sq(domain) .. " " .. sq(mode) .. " " .. sq(enabled))
+end
+
+function rpc_blocked_domain_delete()
+    local id = luci.http.formvalue("id") or ""
+    run_rpc("delete_blocked_domain " .. sq(id))
 end
 
 function rpc_multiebay_import()

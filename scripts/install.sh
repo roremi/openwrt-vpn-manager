@@ -14,6 +14,7 @@ install -m 0755 "$BASE_DIR/src/lib/vpn-manager/health.sh" /usr/libexec/vpn-manag
 install -m 0755 "$BASE_DIR/scripts/vpn-reconcile.sh" /usr/libexec/vpn-manager/reconcile.sh
 install -m 0755 "$BASE_DIR/scripts/vpn-watchdog.sh" /usr/libexec/vpn-manager/watchdog.sh
 install -m 0755 "$BASE_DIR/scripts/vpn-healthcheck.sh" /usr/libexec/vpn-manager/healthcheck.sh
+install -m 0755 "$BASE_DIR/scripts/vpn-block-refresh.sh" /usr/libexec/vpn-manager/block-refresh.sh
 install -m 0755 "$BASE_DIR/scripts/rollback.sh" /usr/libexec/vpn-manager/rollback.sh
 install -m 0755 "$BASE_DIR/scripts/backup.sh" /usr/libexec/vpn-manager/backup.sh
 install -m 0755 "$BASE_DIR/scripts/restore.sh" /usr/libexec/vpn-manager/restore.sh
@@ -38,6 +39,7 @@ for f in \
     /usr/libexec/vpn-manager/reconcile.sh \
     /usr/libexec/vpn-manager/watchdog.sh \
     /usr/libexec/vpn-manager/healthcheck.sh \
+    /usr/libexec/vpn-manager/block-refresh.sh \
     /usr/libexec/vpn-manager/rollback.sh \
     /usr/libexec/vpn-manager/backup.sh \
     /usr/libexec/vpn-manager/restore.sh \

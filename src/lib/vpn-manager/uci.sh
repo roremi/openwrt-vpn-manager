@@ -231,6 +231,14 @@ vm_wifi_binding_list() {
     uci -q show "$VM_CFG" | sed -n 's/^vpn-manager\.\([^.=]*\)=wifi_binding$/\1/p'
 }
 
+vm_blocked_domain_list() {
+    uci -q show "$VM_CFG" | sed -n 's/^vpn-manager\.\([^.=]*\)=blocked_domain$/\1/p'
+}
+
+vm_blocked_domain_exists() {
+    [ "$(uci -q get "$VM_CFG.$1")" = "blocked_domain" ]
+}
+
 vm_wifi_binding_exists() {
     uci -q get "$VM_CFG.$1" >/dev/null 2>&1
 }

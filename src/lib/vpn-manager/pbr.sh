@@ -8,6 +8,7 @@ VM_NFT_NAT_FILE="/tmp/vpn-manager/vpn-manager-nat.nft"
 VM_NFT_DNS_FILE="/tmp/vpn-manager/vpn-manager-dns.nft"
 VM_NFT_DNS_GUARD_FILE="/tmp/vpn-manager/vpn-manager-dns-guard.nft"
 VM_NFT_STRICT_FILE="/tmp/vpn-manager/vpn-manager-strict.nft"
+VM_NFT_BLOCK_FILE="/tmp/vpn-manager/vpn-manager-block.nft"
 VM_SRC_RULES_FILE="/tmp/vpn-manager/source-rules.txt"
 VM_NFT_APPLY_FILE="/tmp/vpn-manager/vpn-manager-apply.nft"
 
@@ -50,6 +51,128 @@ vm_pbr_target_dns() {
     else
         vm_pbr_first_ipv4 "$(uci -q get vpn-manager.$target.dns)"
     fi
+}
+
+# --- Domain blocking -------------------------------------------------------
+# Blocking is IP-based (nftables set) so it works uniformly for every client,
+# including VPN-routed devices whose DNS is force-pinned to a remote resolver
+# and therefore never traverses the local dnsmasq. Each enabled blocked_domain
+# is resolved (via the local resolver AND every active VPN resolver so both the
+# direct and VPN-exit GeoDNS addresses are captured) and its A/AAAA records are
+# dropped in a dedicated forward-hook chain.
+
+# Turn a pasted URL or bare host into a lowercase hostname.
+vm_pbr_block_normalize_domain() {
+    printf '%s' "$1" \
+        | tr 'A-Z' 'a-z' \
+        | tr -d ' \t\r\n' \
+        | sed -E 's#^[a-z][a-z0-9+.-]*://##; s#/.*$##; s#\?.*$##; s#^[^@]*@##; s#:[0-9]+$##; s#^\*\.##; s#^\.+##; s#\.+$##'
+}
+
+# Unique list of resolver IPs to query (local dnsmasq + each enabled VPN DNS).
+vm_pbr_block_resolvers() {
+    {
+        echo "127.0.0.1"
+        local p dns
+        for p in $(vm_profile_list); do
+            [ "$(uci -q get vpn-manager.$p.enabled)" = "1" ] || continue
+            dns="$(vm_pbr_first_ipv4 "$(uci -q get vpn-manager.$p.dns)")"
+            [ -n "$dns" ] && echo "$dns"
+        done
+    } | awk 'NF && !seen[$0]++'
+}
+
+# Resolve a single hostname against a single resolver, printing the answer IPs.
+vm_pbr_block_resolve_one() {
+    nslookup "$1" "$2" 2>/dev/null | awk '
+        NF==0 { past=1; next }
+        past==1 && $1 ~ /^Address/ { print $NF }
+    '
+}
+
+# Build the vpn_manager_block nft table file from the blocked_domain sections.
+# Writes an empty file when nothing is enabled so the table is simply torn down.
+vm_pbr_generate_block() {
+    : > "$VM_NFT_BLOCK_FILE"
+
+    local sec have=0
+    for sec in $(vm_blocked_domain_list); do
+        [ "$(uci -q get vpn-manager.$sec.enabled)" = "0" ] && continue
+        have=1
+        break
+    done
+    [ "$have" = "1" ] || return 0
+
+    local resolvers v4file v6file domain mode names name r ip
+    resolvers="$(vm_pbr_block_resolvers)"
+    v4file="$VM_STATE_DIR/block-v4.$$"
+    v6file="$VM_STATE_DIR/block-v6.$$"
+    : > "$v4file"
+    : > "$v6file"
+
+    for sec in $(vm_blocked_domain_list); do
+        [ "$(uci -q get vpn-manager.$sec.enabled)" = "0" ] && continue
+        domain="$(vm_pbr_block_normalize_domain "$(uci -q get vpn-manager.$sec.domain)")"
+        [ -n "$domain" ] || continue
+        mode="$(uci -q get vpn-manager.$sec.mode)"
+
+        if [ "$mode" = "exact" ]; then
+            names="$domain"
+        else
+            names="$domain www.$domain api.$domain cdn.$domain m.$domain static.$domain assets.$domain login.$domain"
+        fi
+
+        for name in $names; do
+            for r in $resolvers; do
+                for ip in $(vm_pbr_block_resolve_one "$name" "$r"); do
+                    case "$ip" in
+                        *:*) echo "$ip" >> "$v6file" ;;
+                        *.*.*.*) echo "$ip" >> "$v4file" ;;
+                    esac
+                done
+            done
+        done
+    done
+
+    local elems4 elems6
+    elems4="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' "$v4file" | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+    elems6="$(grep -E '^[0-9a-fA-F:]+$' "$v6file" | grep ':' | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+    rm -f "$v4file" "$v6file"
+
+    {
+        echo "table inet vpn_manager_block {"
+        echo "    set blocked4 {"
+        echo "        type ipv4_addr"
+        [ -n "$elems4" ] && echo "        elements = { $elems4 }"
+        echo "    }"
+        echo "    set blocked6 {"
+        echo "        type ipv6_addr"
+        [ -n "$elems6" ] && echo "        elements = { $elems6 }"
+        echo "    }"
+        echo "    chain forward {"
+        echo "        type filter hook forward priority -100; policy accept;"
+        echo "        ip daddr @blocked4 drop"
+        echo "        ip6 daddr @blocked6 drop"
+        echo "    }"
+        echo "}"
+    } > "$VM_NFT_BLOCK_FILE"
+}
+
+# Regenerate and swap only the block table (used by the periodic refresh so DNS
+# rotations for blocked domains are picked up without a full reconcile).
+vm_pbr_refresh_block() {
+    vm_init_dirs
+    vm_pbr_generate_block
+    if [ -s "$VM_NFT_BLOCK_FILE" ]; then
+        nft -c -f "$VM_NFT_BLOCK_FILE" || return 1
+    fi
+    local f="$VM_STATE_DIR/block-apply.$$"
+    {
+        echo "destroy table inet vpn_manager_block"
+        [ -s "$VM_NFT_BLOCK_FILE" ] && cat "$VM_NFT_BLOCK_FILE"
+    } > "$f"
+    nft -f "$f" || true
+    rm -f "$f"
 }
 
 vm_pbr_generate_nft() {
@@ -245,6 +368,11 @@ EOF
     nft -c -f "$VM_NFT_NAT_FILE" || vm_fail "nft nat validation failed"
     nft -c -f "$VM_NFT_DNS_FILE" || vm_fail "nft dns validation failed"
     nft -c -f "$VM_NFT_DNS_GUARD_FILE" || vm_fail "nft dns guard validation failed"
+
+    vm_pbr_generate_block
+    if [ -s "$VM_NFT_BLOCK_FILE" ]; then
+        nft -c -f "$VM_NFT_BLOCK_FILE" || vm_fail "nft block validation failed"
+    fi
 }
 
 vm_pbr_apply_rules() {
@@ -254,11 +382,13 @@ vm_pbr_apply_rules() {
         echo "destroy table ip vpn_manager_dns"
         echo "destroy table inet vpn_manager_dns_guard"
         echo "destroy table inet vpn_manager_strict"
+        echo "destroy table inet vpn_manager_block"
         cat "$VM_NFT_FILE"
         cat "$VM_NFT_NAT_FILE"
         cat "$VM_NFT_DNS_FILE"
         cat "$VM_NFT_DNS_GUARD_FILE"
         cat "$VM_NFT_STRICT_FILE"
+        [ -s "$VM_NFT_BLOCK_FILE" ] && cat "$VM_NFT_BLOCK_FILE"
     } > "$VM_NFT_APPLY_FILE"
 
     # One-shot nft transaction avoids brief periods without strict anti-leak rules.
