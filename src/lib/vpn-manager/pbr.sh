@@ -73,6 +73,8 @@ vm_pbr_block_normalize_domain() {
 vm_pbr_block_resolvers() {
     {
         echo "127.0.0.1"
+        echo "1.1.1.1"
+        echo "8.8.8.8"
         local p dns
         for p in $(vm_profile_list); do
             [ "$(uci -q get vpn-manager.$p.enabled)" = "1" ] || continue
@@ -135,8 +137,8 @@ vm_pbr_generate_block() {
     done
 
     local elems4 elems6
-    elems4="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' "$v4file" | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
-    elems6="$(grep -E '^[0-9a-fA-F:]+$' "$v6file" | grep ':' | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+    elems4="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' "$v4file" | grep -vE '^(0\.0\.0\.0|127\.|169\.254\.)' | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+    elems6="$(grep -E '^[0-9a-fA-F:]+$' "$v6file" | grep ':' | grep -vxE '::|::1' | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
     rm -f "$v4file" "$v6file"
 
     {
