@@ -53,10 +53,28 @@ if [ ! -f /etc/config/vpn-manager ]; then
     install -m 0644 "$BASE_DIR/etc/config/vpn-manager" /etc/config/vpn-manager
 fi
 
-if uci -q get dhcp.@dnsmasq[0].filter_aaaa >/dev/null 2>&1; then
-    uci set dhcp.@dnsmasq[0].filter_aaaa='1'
-    uci commit dhcp
+# Suppress IPv6 for LAN clients when the router has no IPv6 upstream. Otherwise
+# clients receive AAAA records / an RA default route and attempt IPv6 first, but
+# the packets black-hole (no egress) so every page with an AAAA record stalls on
+# a Happy-Eyeballs timeout before falling back to IPv4 (e.g. browserleaks.com).
+# filter_aaaa strips AAAA answers from dnsmasq so clients never try IPv6.
+uci set dhcp.@dnsmasq[0].filter_aaaa='1'
+uci commit dhcp
+
+if [ -z "$(ip -6 route show default 2>/dev/null)" ]; then
+    ra_changed=0
+    for s in $(uci show dhcp 2>/dev/null | grep "\.ra='server'" | sed "s/^dhcp\.//; s/\.ra=.*//"); do
+        uci set "dhcp.$s.ra=disabled"
+        uci set "dhcp.$s.dhcpv6=disabled"
+        uci -q delete "dhcp.$s.ra_slaac"
+        uci -q delete "dhcp.$s.ra_flags"
+        ra_changed=1
+    done
+    [ "$ra_changed" = "1" ] && uci commit dhcp
 fi
+
+/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+/etc/init.d/odhcpd restart >/dev/null 2>&1 || true
 
 /etc/init.d/rpcd restart
 /etc/init.d/uhttpd restart
