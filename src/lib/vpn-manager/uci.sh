@@ -136,7 +136,10 @@ vm_wireguard_sync_profile() {
     uci set "network.$iface.defaultroute=0"
     [ -n "$private_key" ] && uci set "network.$iface.private_key=$private_key"
     [ -n "$mtu" ] && uci set "network.$iface.mtu=$mtu"
-    [ -n "$dns" ] && uci add_list "network.$iface.dns=$dns"
+    # Do NOT publish the tunnel DNS as an interface option: netifd would add it to
+    # the global /tmp/resolv.conf.d/resolv.conf.auto and dnsmasq would then resolve
+    # ALL clients (including WAN-routed ones) through the foreign tunnel resolver.
+    # VPN-routed clients get their DNS via the per-device DNAT generated in pbr.sh.
     [ -n "$address" ] && uci add_list "network.$iface.addresses=$address"
 
     uci -q delete "network.${iface}_peer"
