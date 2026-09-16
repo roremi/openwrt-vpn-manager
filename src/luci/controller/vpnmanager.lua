@@ -12,6 +12,7 @@ function index()
     entry({"admin", "services", "vpnmanager", "devices"}, call("rpc_devices")).leaf = true
     entry({"admin", "services", "vpnmanager", "policies"}, call("rpc_policies")).leaf = true
     entry({"admin", "services", "vpnmanager", "status"}, call("rpc_status")).leaf = true
+    entry({"admin", "services", "vpnmanager", "apply_status"}, call("rpc_apply_status")).leaf = true
     entry({"admin", "services", "vpnmanager", "audit"}, call("rpc_audit")).leaf = true
     entry({"admin", "services", "vpnmanager", "toggle"}, call("rpc_toggle")).leaf = true
     entry({"admin", "services", "vpnmanager", "policy"}, call("rpc_policy")).leaf = true
@@ -28,6 +29,14 @@ function index()
     entry({"admin", "services", "vpnmanager", "blocked_domains"}, call("rpc_blocked_domains")).leaf = true
     entry({"admin", "services", "vpnmanager", "blocked_domain_save"}, call("rpc_blocked_domain_save")).leaf = true
     entry({"admin", "services", "vpnmanager", "blocked_domain_delete"}, call("rpc_blocked_domain_delete")).leaf = true
+    entry({"admin", "services", "vpnmanager", "http_debug"}, call("rpc_http_debug")).leaf = true
+    entry({"admin", "services", "vpnmanager", "http_debug_log"}, call("rpc_http_debug_log")).leaf = true
+    entry({"admin", "services", "vpnmanager", "http_debug_save"}, call("rpc_http_debug_save")).leaf = true
+    entry({"admin", "services", "vpnmanager", "http_debug_client_save"}, call("rpc_http_debug_client_save")).leaf = true
+    entry({"admin", "services", "vpnmanager", "http_debug_client_delete"}, call("rpc_http_debug_client_delete")).leaf = true
+    entry({"admin", "services", "vpnmanager", "blocked_url_save"}, call("rpc_blocked_url_save")).leaf = true
+    entry({"admin", "services", "vpnmanager", "blocked_url_delete"}, call("rpc_blocked_url_delete")).leaf = true
+    entry({"admin", "services", "vpnmanager", "http_debug_ca"}, call("http_debug_ca")).leaf = true
     entry({"admin", "services", "vpnmanager", "route_status"}, call("rpc_route_status")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings"}, call("rpc_multiebay_settings")).leaf = true
     entry({"admin", "services", "vpnmanager", "multiebay_settings_save"}, call("rpc_multiebay_settings_save")).leaf = true
@@ -60,6 +69,11 @@ function index()
     p.sysauth = false
 
     p = entry({"vpnmanager", "api", "v1", "status"}, call("api_v1_status"), nil)
+    p.leaf = true
+    p.dependent = false
+    p.sysauth = false
+
+    p = entry({"vpnmanager", "api", "v1", "apply_status"}, call("api_v1_apply_status"), nil)
     p.leaf = true
     p.dependent = false
     p.sysauth = false
@@ -173,6 +187,10 @@ function rpc_status()
     run_rpc("status")
 end
 
+function rpc_apply_status()
+    run_rpc("apply_status")
+end
+
 function rpc_audit()
     run_rpc("audit_log")
 end
@@ -246,9 +264,24 @@ function rpc_import()
     local content = luci.http.formvalue("content") or ""
 
     if content ~= "" then
-        local tmp = "/tmp/vpnmanager-import-" .. tostring(os.time()) .. ".conf"
-        local fh = nixio.open(tmp, "w", 420)
+        -- WireGuard imports contain private and preshared keys. Use mktemp for
+        -- exclusive creation, force 0600, and remove the source after the
+        -- synchronous RPC has consumed it.
+        local tmp = luci.sys.exec(
+            "umask 077; mktemp /tmp/vpnmanager-import.XXXXXX 2>/dev/null"
+        ):match("([^\r\n]+)")
+        if not tmp or not tmp:match("^/tmp/vpnmanager%-import%.[A-Za-z0-9]+$") then
+            luci.http.status(500, "Internal Server Error")
+            luci.http.prepare_content("application/json")
+            luci.http.write('{"ok":false,"error":"unable to create temp file"}')
+            return
+        end
+
+        -- nixio expects a chmod-style mode string here.  Passing decimal 384
+        -- (0600) raises "bad argument #3" on current OpenWrt/LuCI releases.
+        local fh = nixio.open(tmp, "w", "600")
         if not fh then
+            nixio.fs.unlink(tmp)
             luci.http.status(500, "Internal Server Error")
             luci.http.prepare_content("application/json")
             luci.http.write('{"ok":false,"error":"unable to write temp file"}')
@@ -258,6 +291,16 @@ function rpc_import()
         fh:write(content)
         fh:close()
         path = tmp
+
+        local rpc_ok, rpc_error = pcall(
+            run_rpc,
+            "import_profile " .. sq(id) .. " " .. sq(path)
+        )
+        nixio.fs.unlink(tmp)
+        if not rpc_ok then
+            error(rpc_error)
+        end
+        return
     end
 
     run_rpc("import_profile " .. sq(id) .. " " .. sq(path))
@@ -331,6 +374,60 @@ end
 function rpc_blocked_domain_delete()
     local id = luci.http.formvalue("id") or ""
     run_rpc("delete_blocked_domain " .. sq(id))
+end
+
+function rpc_http_debug()
+    run_rpc("http_debug_status")
+end
+
+function rpc_http_debug_log()
+    run_rpc("http_debug_log")
+end
+
+function rpc_http_debug_save()
+    local enabled = luci.http.formvalue("enabled") or "0"
+    run_rpc("save_http_debug_settings " .. sq(enabled))
+end
+
+function rpc_http_debug_client_save()
+    local id = luci.http.formvalue("id") or ""
+    local mac = luci.http.formvalue("mac") or ""
+    local ip = luci.http.formvalue("ip") or ""
+    local hostname = luci.http.formvalue("hostname") or ""
+    local enabled = luci.http.formvalue("enabled") or "1"
+    run_rpc("save_http_debug_client " .. sq(id) .. " " .. sq(mac) .. " " .. sq(ip) .. " " .. sq(hostname) .. " " .. sq(enabled))
+end
+
+function rpc_http_debug_client_delete()
+    local id = luci.http.formvalue("id") or ""
+    run_rpc("delete_http_debug_client " .. sq(id))
+end
+
+function rpc_blocked_url_save()
+    local id = luci.http.formvalue("id") or ""
+    local url = luci.http.formvalue("url") or ""
+    local method = luci.http.formvalue("method") or "*"
+    local enabled = luci.http.formvalue("enabled") or "1"
+    run_rpc("save_blocked_url " .. sq(id) .. " " .. sq(url) .. " " .. sq(method) .. " " .. sq(enabled))
+end
+
+function rpc_blocked_url_delete()
+    local id = luci.http.formvalue("id") or ""
+    run_rpc("delete_blocked_url " .. sq(id))
+end
+
+function http_debug_ca()
+    local path = "/etc/vpn-manager/mitmproxy/mitmproxy-ca-cert.pem"
+    local cert = nixio.fs.readfile(path)
+    if not cert then
+        luci.http.status(404, "Not Found")
+        luci.http.prepare_content("application/json")
+        luci.http.write('{"ok":false,"error":"CA certificate is not ready"}')
+        return
+    end
+    luci.http.header("Content-Disposition", 'attachment; filename="vpn-manager-mitm-ca.pem"')
+    luci.http.prepare_content("application/x-pem-file")
+    luci.http.write(cert)
 end
 
 function rpc_multiebay_import()
@@ -420,6 +517,11 @@ end
 function api_v1_status()
     if not api_require_key() then return end
     run_rpc("status")
+end
+
+function api_v1_apply_status()
+    if not api_require_key() then return end
+    run_rpc("apply_status")
 end
 
 function api_v1_route_status()

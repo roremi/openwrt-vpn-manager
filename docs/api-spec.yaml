@@ -13,8 +13,119 @@ tags:
   - name: Policies
   - name: WiFi
   - name: MultiEbay
+  - name: HTTP Debug
   - name: Operations
 paths:
+  /http_debug:
+    get:
+      tags: [HTTP Debug]
+      summary: Get proxy runtime, selected clients, and exact URL rules
+      responses:
+        '200':
+          description: HTTP debug state
+  /http_debug_log:
+    get:
+      tags: [HTTP Debug]
+      summary: Get recent transparent HTTP access and header logs
+      responses:
+        '200':
+          description: Last 200 safely encoded Squid log lines
+  /http_debug_save:
+    post:
+      tags: [HTTP Debug]
+      summary: Enable or disable transparent HTTP/HTTPS interception
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled:
+                  type: string
+                  enum: ['0', '1']
+      responses:
+        '200':
+          description: Operation result
+  /http_debug_client_save:
+    post:
+      tags: [HTTP Debug]
+      summary: Select one LAN or dedicated-WiFi client for transparent capture
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [mac, ip]
+              properties:
+                id: { type: string }
+                mac: { type: string }
+                ip: { type: string }
+                hostname: { type: string }
+                enabled: { type: string, enum: ['0', '1'] }
+      responses:
+        '200':
+          description: Operation result
+  /http_debug_client_delete:
+    post:
+      tags: [HTTP Debug]
+      summary: Remove one client's proxy access
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        '200':
+          description: Operation result
+  /blocked_url_save:
+    post:
+      tags: [HTTP Debug]
+      summary: Create or update an exact URL/path block rule
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [url, method]
+              properties:
+                id: { type: string }
+                url: { type: string, format: uri }
+                method: { type: string }
+                enabled: { type: string, enum: ['0', '1'] }
+      responses:
+        '200':
+          description: Operation result
+  /blocked_url_delete:
+    post:
+      tags: [HTTP Debug]
+      summary: Delete an exact URL/path block rule
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        '200':
+          description: Operation result
+  /http_debug_ca:
+    get:
+      tags: [HTTP Debug]
+      summary: Download the generated MITM CA certificate
+      responses:
+        '200':
+          description: PEM CA certificate
+          content:
+            application/x-pem-file:
+              schema:
+                type: string
+                format: binary
   /profiles:
     get:
       tags: [Profiles]
@@ -284,7 +395,7 @@ paths:
   /apply:
     post:
       tags: [Operations]
-      summary: Reconcile and apply current config
+      summary: Explicitly enqueue a full reconcile
       responses:
         '200':
           description: Apply result
@@ -292,6 +403,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OkResponse'
+  /apply_status:
+    get:
+      tags: [Operations]
+      summary: Read coalesced core and domain-block worker state
+      responses:
+        '200':
+          description: Background apply status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyStatus'
   /rollback:
     post:
       tags: [Operations]
@@ -521,6 +643,11 @@ components:
           type: boolean
         error:
           type: string
+        queued:
+          type: boolean
+        job:
+          type: string
+          enum: [network, full, pbr, block]
       examples:
         success:
           value:
@@ -529,6 +656,29 @@ components:
           value:
             ok: false
             error: apply failed
+    ApplyStatus:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        pending:
+          type: boolean
+        core:
+          $ref: '#/components/schemas/JobStatus'
+        block:
+          $ref: '#/components/schemas/JobStatus'
+    JobStatus:
+      type: object
+      properties:
+        job:
+          type: string
+        state:
+          type: string
+          enum: [idle, queued, running, done, error]
+        updated_at:
+          type: integer
+        detail:
+          type: string
     Profile:
       type: object
       properties:

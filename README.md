@@ -15,6 +15,7 @@ A production-oriented OpenWrt package for managing multiple WireGuard profiles, 
 - nftables-first policy and firewall control
 - LuCI web UI and ubus/rpcd backend
 - Audit logging with private-key redaction
+- Optional HTTP/HTTPS debugging proxy with per-device access control and exact URL/path rules
 
 ## Project Layout
 
@@ -160,6 +161,16 @@ ps | grep vpn-manager
 4. Paste proxy string
 5. Click `Generate & Apply`
 6. Wait for the profile to appear in `VPN Profiles`
+
+### D) Inspect HTTP/HTTPS and block an exact URL
+
+1. Open `Services -> VPN Manager -> HTTP Debug`.
+2. Select one test device, then enable transparent capture.
+3. Download the CA from VPN Manager and trust it on the test device for HTTPS inspection. No device proxy setting is required.
+4. Add URL rules such as `POST https://example.com/api/login` or use a trailing wildcard such as `/private/*`.
+5. Read URL, method, status, and request/response headers in the built-in log panel.
+
+HTTP Debug is disabled by default. Selected TCP 80/443 traffic is redirected through Squid, while UDP/443 is rejected to prevent QUIC bypass. HTTPS is decrypted only for hosts referenced by enabled HTTPS URL rules; all other TLS traffic is spliced unchanged. Squid uses the assigned VPN DNS and binds each upstream connection to the WireGuard address selected by the device policy or dedicated SSID. An output guard prevents fallback to WAN. Certificate-pinned apps may reject inspection of a rule-target host. Headers may expose credentials and tokens; request and response bodies are not stored.
 
 ## Notes For WiFi Routing
 

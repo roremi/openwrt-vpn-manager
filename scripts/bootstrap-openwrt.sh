@@ -21,7 +21,10 @@ install_with_apk() {
         luci-base \
         ca-certificates \
         openssh-sftp-server \
-        coreutils-install
+        coreutils-install \
+        squid \
+        openssl-util \
+        conntrack
 }
 
 install_with_opkg() {
@@ -36,7 +39,14 @@ install_with_opkg() {
         jq \
         rpcd \
         ucode \
-        luci-base
+        luci-base \
+        squid \
+        openssl-util \
+        conntrack
+
+    # Most OpenWrt BusyBox builds include install(1). Pull in the coreutils
+    # applet only on images that omit it, because install.sh relies on modes.
+    need_cmd install || opkg install coreutils-install
 }
 
 if need_cmd apk; then

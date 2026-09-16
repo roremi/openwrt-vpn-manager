@@ -5,9 +5,16 @@
       "ubus": {
         "vpn-manager": [
           "status",
+          "apply_status",
           "list_profiles",
           "list_devices",
+          "list_policies",
+          "list_wifi",
+          "list_wifi_bindings",
           "list_blocked_domains",
+          "http_debug_status",
+          "http_debug_log",
+          "route_status",
           "audit_log"
         ]
       }
@@ -15,16 +22,23 @@
     "write": {
       "ubus": {
         "vpn-manager": [
-          "create_profile",
-          "update_profile",
+          "set_profile",
           "delete_profile",
           "toggle_profile",
           "import_profile",
           "set_policy",
-          "bulk_policy",
+          "delete_policy",
           "test_profile",
+          "set_wifi",
+          "save_wifi_binding",
+          "delete_wifi_binding",
           "save_blocked_domain",
           "delete_blocked_domain",
+          "save_http_debug_settings",
+          "save_http_debug_client",
+          "delete_http_debug_client",
+          "save_blocked_url",
+          "delete_blocked_url",
           "apply",
           "rollback"
         ]

@@ -70,18 +70,35 @@ curl -s "http://192.168.1.1/cgi-bin/luci/vpnmanager/api/v1/devices?api_key=YOUR_
 ### Operations
 
 - GET /status
+- GET /apply_status
 - GET /route_status
 - GET /audit
 - POST /apply
 - POST /rollback
+
+### HTTP Debug
+
+- GET /http_debug
+- GET /http_debug_log
+- POST /http_debug_save
+- POST /http_debug_client_save
+- POST /http_debug_client_delete
+- POST /blocked_url_save
+- POST /blocked_url_delete
+- GET /http_debug_ca
 
 ## 3) Common Response Patterns
 
 ### Success pattern
 
 {
-  "ok": true
+  "ok": true,
+  "queued": true,
+  "job": "pbr"
 }
+
+Mutations commit under a short configuration lock and enqueue the smallest
+background job. A client must not call `POST /apply` after every mutation.
 
 ### Error pattern
 
@@ -90,6 +107,10 @@ curl -s "http://192.168.1.1/cgi-bin/luci/vpnmanager/api/v1/devices?api_key=YOUR_
   "error": "message"
 }
 
+`configuration is busy; retry` is transient. Retry the same idempotent request
+with exponential backoff (for example 100 ms up to 1 second) instead of opening
+parallel requests. The bundled dashboard does this automatically.
+
 ### Generic unsupported route or method
 
 {
@@ -97,6 +118,22 @@ curl -s "http://192.168.1.1/cgi-bin/luci/vpnmanager/api/v1/devices?api_key=YOUR_
 }
 
 ## 4) Detailed API Reference
+
+### HTTP Debug control
+
+`GET /http_debug` returns transparent Squid readiness, runtime state, CA readiness, selected clients, and URL rules.
+
+`GET /http_debug_log` returns the last 200 Squid access-log lines. Each line contains URL, method, response status and safely encoded request/response headers. Bodies are not stored.
+
+`POST /http_debug_save` accepts `enabled=0|1`. The proxy remains disabled by default.
+
+`POST /http_debug_client_save` accepts `id` (optional), `mac`, `ip`, `hostname`, and `enabled`. TCP 80/443 from enabled client IPs is transparently intercepted and UDP/443 is rejected to prevent QUIC bypass. HTTPS is decrypted only for hosts referenced by enabled HTTPS URL rules; unrelated TLS connections are spliced unchanged. Use `POST /http_debug_client_delete` with `id` to stop capture.
+
+`POST /blocked_url_save` accepts `id` (optional), an absolute `http://` or `https://` URL, `method` (`*`, GET, POST, PUT, PATCH, DELETE, HEAD, or OPTIONS), and `enabled`. A trailing `*` in the path matches a path branch. Use `POST /blocked_url_delete` with `id` to delete the rule.
+
+`GET /http_debug_ca` downloads the generated CA certificate after capture has started once. HTTPS inspection only requires trusting this CA; no explicit proxy configuration is needed.
+
+Transparent upstream connections use the selected VPN DNS and bind to the WireGuard address selected by the device policy or dedicated WiFi subnet. A source rule sends them through the matching route table and an nft output guard prevents fallback to WAN. Certificate-pinned applications may reject inspection of a rule-target host.
 
 ### 4.1 GET /profiles
 
@@ -480,7 +517,11 @@ Sample integration errors:
 ### 4.16 Apply and Rollback
 
 #### POST /apply
-- Reconcile and apply staged state.
+- Explicitly enqueue a full reconcile. Normal profile, policy, domain, and WiFi mutations already enqueue the smallest required job, so clients should not call this after every mutation.
+
+#### GET /apply_status
+- Read the coalesced background worker state for core and domain-block jobs.
+- Poll until `pending` is false and neither job is `queued` or `running`.
 
 Success:
 
@@ -502,22 +543,22 @@ Failure:
 
 ### Scenario A: Assign one device to VPN
 
-1. Create or import profile.
-2. Set device policy target to profile.
-3. Call apply.
+1. Create or import profile (returns `queued: true`).
+2. Set device policy target to profile (returns `job: pbr`).
+3. Poll apply_status until idle/done.
 4. Check route_status and test profile.
 
 ### Scenario B: Emergency fallback to WAN
 
 1. Set same policy section target to wan.
-2. Call apply.
+2. Poll apply_status until the PBR job is done.
 3. Verify route_status for wan egress.
 
 ### Scenario C: Dedicated Guest WiFi through VPN
 
 1. Save or verify target profile.
 2. Create wifi_binding with target profile.
-3. Apply changes.
+3. Poll apply_status until the queued network job completes.
 4. Connect client to that SSID and verify egress IP.
 
 ## 6) Client Implementation Recommendations
@@ -525,7 +566,8 @@ Failure:
 1. Use stable section ids for idempotent policy updates.
 2. Always send MAC in lowercase format.
 3. Send both MAC and IP whenever possible.
-4. Poll devices and policies every 5 to 10 seconds.
-5. Poll route_status less frequently, around 20 to 30 seconds.
-6. On apply failed, fetch audit and offer rollback action.
-7. Keep one-click WAN fallback in UI for incident handling.
+4. Do not overlap polling requests; pause polling while the client is hidden/offline.
+5. Poll lightweight status/apply_status every 10 to 30 seconds and route_status no more than once per minute.
+6. Retry a transient configuration-busy response with bounded exponential backoff.
+7. On apply failure, fetch audit and offer the rollback action.
+8. Keep one-click WAN fallback in UI for incident handling.

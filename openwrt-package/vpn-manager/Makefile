@@ -7,7 +7,7 @@ PKG_RELEASE:=1
 include $(INCLUDE_DIR)/package.mk
 
 LUCI_TITLE:=LuCI VPN Multi-Manager
-LUCI_DEPENDS:=+luci-base +rpcd +wireguard-tools +kmod-wireguard +nftables +ip-full +jq +curl +ca-bundle
+LUCI_DEPENDS:=+luci-base +rpcd +wireguard-tools +kmod-wireguard +nftables +ip-full +jq +curl +ca-bundle +squid +openssl-util +conntrack
 PKG_LICENSE:=MIT
 
 

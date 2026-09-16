@@ -5,12 +5,32 @@ STOP=10
 USE_PROCD=1
 
 start_service() {
-    procd_open_instance
-    procd_set_param command /bin/sh -c '/usr/libexec/vpn-manager/reconcile.sh; i=0; while true; do /usr/libexec/vpn-manager/healthcheck.sh; /usr/libexec/vpn-manager/watchdog.sh; i=$((i+1)); [ $((i % 90)) -eq 0 ] && /usr/libexec/vpn-manager/block-refresh.sh; sleep 20; done'
+    procd_open_instance apply
+    procd_set_param command /usr/libexec/vpn-manager/apply-worker.sh
+    procd_set_param respawn 3600 5 5
+    procd_close_instance
+
+    procd_open_instance block
+    procd_set_param command /usr/libexec/vpn-manager/block-worker.sh
+    procd_set_param respawn 3600 5 5
+    procd_close_instance
+
+    procd_open_instance monitor
+    procd_set_param command /bin/sh -c '. /usr/libexec/vpn-manager/common.sh; next_block=$(( $(date +%s) + 1800 )); while true; do /usr/libexec/vpn-manager/healthcheck.sh; /usr/libexec/vpn-manager/watchdog.sh; now=$(date +%s); retry_at=$(sed -n "1p" "$VM_STATE_DIR/block-retry-at" 2>/dev/null || true); case "$retry_at" in ""|*[!0-9]*) retry_at=0 ;; esac; if [ "$retry_at" -gt 0 ] && [ "$now" -ge "$retry_at" ]; then rm -f "$VM_STATE_DIR/block-retry-at"; vm_block_request resolver-retry; fi; if [ "$now" -ge "$next_block" ]; then vm_block_request periodic; next_block=$((now + 1800)); fi; sleep 20; done'
+    procd_set_param respawn 3600 5 5
+    procd_close_instance
+
+    procd_open_instance route_status
+    procd_set_param command /usr/libexec/vpn-manager/route-status-worker.sh
+    procd_set_param respawn 3600 5 5
+    procd_close_instance
+
+    procd_open_instance http_debug
+    procd_set_param command /usr/libexec/vpn-manager/http-debug.sh start
     procd_set_param respawn 3600 5 5
     procd_close_instance
 }
 
 reload_service() {
-    /usr/libexec/vpn-manager/reconcile.sh
+    /bin/sh -c '. /usr/libexec/vpn-manager/common.sh; vm_apply_request full reload'
 }

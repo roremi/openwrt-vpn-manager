@@ -148,6 +148,7 @@
                         <tr><td>GET</td><td>/status</td><td>Dashboard counters: healthy/down profiles.</td></tr>
                         <tr><td>GET</td><td>/route_status</td><td>Route target and egress IP summary (cached for performance).</td></tr>
                         <tr><td>GET</td><td>/audit</td><td>Latest audit log lines.</td></tr>
+                        <tr><td>GET</td><td>/apply_status</td><td>Background core/block apply state and pending flag.</td></tr>
                         <tr><td>GET</td><td>/wifi</td><td>Current WiFi base settings.</td></tr>
                         <tr><td>GET</td><td>/wifi_bindings</td><td>Dedicated WiFi-over-VPN bindings.</td></tr>
                         <tr><td>GET</td><td>/multiebay_settings</td><td>Saved MultiEbay settings (API key redacted status).</td></tr>
@@ -184,7 +185,7 @@
 
         <div class="section card">
             <h2>Quick Workflow: Assign VPN To A Device</h2>
-            <p class="muted">This is the most common full-feature use case: import profile, bind device policy, verify route, then apply.</p>
+            <p class="muted">Mutations commit immediately and enqueue the smallest background job. Import the profile, bind the policy, then poll apply_status until the job is done.</p>
             <pre># 1) Import a WireGuard profile by raw config content
 curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/import" \
   --data-urlencode "id=vpn_sg_01" \
@@ -205,13 +206,13 @@ curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/polic
   --data-urlencode "ip=192.168.1.195" \
   --data-urlencode "target=vpn_sg_01"
 
-# 3) Validate route status and profile health
+# 3) Poll the coalesced background apply (no extra POST /apply is needed)
+curl -s "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/apply_status"
+
+# 4) Validate route status and profile health
 curl -s "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/route_status"
 curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/test" \
-  --data-urlencode "id=vpn_sg_01"
-
-# 4) Apply staged changes atomically
-curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/apply"</pre>
+  --data-urlencode "id=vpn_sg_01"</pre>
             <div class="ok">Best practice: use stable policy section ids and keep MAC + IP together. The backend deduplicates policy conflicts by MAC/IP automatically.</div>
         </div>
 
@@ -237,7 +238,9 @@ curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/apply
                 <div>
                     <h3>POST /policy</h3>
                     <pre>{
-  "ok": true
+  "ok": true,
+  "queued": true,
+  "job": "pbr"
 }</pre>
                     <h3 style="margin-top:10px;">POST /test</h3>
                     <pre>{
@@ -257,6 +260,7 @@ curl -s -X POST "http://192.168.1.1/cgi-bin/luci/admin/services/vpnmanager/apply
                 </thead>
                 <tbody>
                     <tr><td>{"ok":false,"error":"missing args"}</td><td>Required form fields are missing</td><td>Validate required request fields client side before submit</td></tr>
+                    <tr><td>{"ok":false,"error":"configuration is busy; retry"}</td><td>A short core apply currently owns the config snapshot</td><td>Retry the same request with bounded exponential backoff; do not create parallel waiters</td></tr>
                     <tr><td>{"ok":false,"error":"profile not found"}</td><td>Target profile id does not exist</td><td>Refresh profiles and retry with a valid id</td></tr>
                     <tr><td>{"ok":false,"error":"apply failed"}</td><td>Reconcile stage failed</td><td>Check audit log, fix config, or call rollback</td></tr>
                     <tr><td>{"error":"unsupported method"}</td><td>Wrong endpoint mapping to rpcd action</td><td>Use exact path listed in docs</td></tr>

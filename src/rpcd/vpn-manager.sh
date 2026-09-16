@@ -1,12 +1,426 @@
 #!/bin/sh
 
-. /usr/libexec/vpn-manager/common.sh
-. /usr/libexec/vpn-manager/uci.sh
-. /usr/libexec/vpn-manager/health.sh
+umask 077
+
+VM_LIB_DIR="${VM_LIB_DIR:-/usr/libexec/vpn-manager}"
+. "$VM_LIB_DIR/common.sh"
+. "$VM_LIB_DIR/uci.sh"
+. "$VM_LIB_DIR/health.sh"
 
 json_escape() {
-    echo "$1" | sed 's/"/\\"/g'
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\r\n\t' '   '
 }
+
+# Build list responses from one UCI snapshot. Besides avoiding one `uci get`
+# process per field, parsing the health snapshot in the same awk invocation
+# avoids two full health-file scans per profile.
+rpc_snapshot_json() {
+    snapshot_view="$1"
+    health_file="$VM_STATE_DIR/health-snapshot.txt"
+    snapshot_file="$VM_STATE_DIR/rpc-config-snapshot.$$"
+    [ -r "$health_file" ] || health_file=/dev/null
+
+    vm_init_dirs
+    rm -f "$snapshot_file"
+    if ! (umask 077; uci -q show "$VM_CFG" > "$snapshot_file" 2>/dev/null); then
+        rm -f "$snapshot_file"
+        return 1
+    fi
+
+    awk \
+        -v view="$snapshot_view" \
+        -v config="$VM_CFG" \
+        -v health_file="$health_file" '
+        function uci_decode(input,    output, i, ch, quoted, pending_space, started) {
+            output=""
+            quoted=0
+            pending_space=0
+            started=0
+
+            for (i=1; i<=length(input); i++) {
+                ch=substr(input, i, 1)
+                if (quoted) {
+                    if (ch == "\047") {
+                        quoted=0
+                        started=1
+                    } else {
+                        output=output ch
+                    }
+                    continue
+                }
+
+                if (ch == "\047") {
+                    if (pending_space && started) output=output " "
+                    pending_space=0
+                    quoted=1
+                } else if (ch == "\\") {
+                    if (pending_space && started) output=output " "
+                    pending_space=0
+                    if (i < length(input)) {
+                        i++
+                        output=output substr(input, i, 1)
+                    }
+                    started=1
+                } else if (ch ~ /[[:space:]]/) {
+                    pending_space=1
+                } else {
+                    if (pending_space && started) output=output " "
+                    pending_space=0
+                    output=output ch
+                    started=1
+                }
+            }
+            return output
+        }
+
+        function json_escape(input,    output, i, ch, code) {
+            output=""
+            for (i=1; i<=length(input); i++) {
+                ch=substr(input, i, 1)
+                if (ch == "\\") {
+                    output=output "\\\\"
+                } else if (ch == "\"") {
+                    output=output "\\\""
+                } else {
+                    code=index(control_chars, ch)
+                    if (code > 0) output=output sprintf("\\u%04x", code)
+                    else output=output ch
+                }
+            }
+            return output
+        }
+
+        function option(section, name) {
+            return values[section SUBSEP name]
+        }
+
+        function remember_section(section) {
+            if (!(section in section_seen)) {
+                section_seen[section]=1
+                section_order[++section_count]=section
+            }
+        }
+
+        BEGIN {
+            for (control_code=1; control_code<32; control_code++) {
+                control_chars=control_chars sprintf("%c", control_code)
+            }
+        }
+
+        FILENAME == health_file {
+            health_fields=split($0, health_part, "|")
+            if (health_fields >= 1 && health_part[1] != "") {
+                health_seen[health_part[1]]=1
+                health_status[health_part[1]]=health_part[3]
+                health_age[health_part[1]]=health_part[4]
+            }
+            next
+        }
+
+        {
+            equals=index($0, "=")
+            if (equals == 0) next
+
+            left=substr($0, 1, equals-1)
+            prefix=config "."
+            if (substr(left, 1, length(prefix)) != prefix) next
+
+            path=substr(left, length(prefix)+1)
+            dot=index(path, ".")
+            decoded=uci_decode(substr($0, equals+1))
+            if (dot == 0) {
+                section=path
+                remember_section(section)
+                section_type[section]=decoded
+            } else {
+                section=substr(path, 1, dot-1)
+                name=substr(path, dot+1)
+                remember_section(section)
+                values[section SUBSEP name]=decoded
+            }
+        }
+
+        END {
+            if (view == "profiles") {
+                printf "{\"profiles\":["
+                emitted=0
+                for (index_no=1; index_no<=section_count; index_no++) {
+                    section=section_order[index_no]
+                    if (section_type[section] != "profile") continue
+                    if (emitted++) printf ","
+
+                    status="unknown"
+                    age="999999"
+                    if (health_seen[section]) {
+                        if (health_status[section] != "") status=health_status[section]
+                        if (health_age[section] != "") age=health_age[section]
+                    }
+
+                    endpoint=option(section, "endpoint_host") ":" option(section, "endpoint_port")
+                    printf "{\"id\":\"%s\",\"name\":\"%s\",\"iface\":\"%s\",\"endpoint\":\"%s\",\"enabled\":\"%s\",\"status\":\"%s\",\"handshake_age\":\"%s\",\"address\":\"%s\",\"dns\":\"%s\",\"allowed_ips\":\"%s\",\"mtu\":\"%s\",\"persistent_keepalive\":\"%s\",\"public_key\":\"%s\"}", \
+                        json_escape(section), \
+                        json_escape(option(section, "name")), \
+                        json_escape(option(section, "iface")), \
+                        json_escape(endpoint), \
+                        json_escape(option(section, "enabled")), \
+                        json_escape(status), \
+                        json_escape(age), \
+                        json_escape(option(section, "address")), \
+                        json_escape(option(section, "dns")), \
+                        json_escape(option(section, "allowed_ips")), \
+                        json_escape(option(section, "mtu")), \
+                        json_escape(option(section, "persistent_keepalive")), \
+                        json_escape(option(section, "public_key"))
+                }
+                printf "]}"
+                exit
+            }
+
+            if (view == "policies") {
+                printf "{\"policies\":["
+                emitted=0
+                for (index_no=1; index_no<=section_count; index_no++) {
+                    section=section_order[index_no]
+                    if (section_type[section] != "device_policy") continue
+                    if (emitted++) printf ","
+                    printf "{\"section\":\"%s\",\"hostname\":\"%s\",\"mac\":\"%s\",\"ip\":\"%s\",\"target\":\"%s\"}", \
+                        json_escape(section), \
+                        json_escape(option(section, "hostname")), \
+                        json_escape(option(section, "mac")), \
+                        json_escape(option(section, "ip")), \
+                        json_escape(option(section, "target"))
+                }
+                printf "]}"
+                exit
+            }
+
+            if (view == "blocked_domains") {
+                printf "{\"ok\":true,\"domains\":["
+                emitted=0
+                for (index_no=1; index_no<=section_count; index_no++) {
+                    section=section_order[index_no]
+                    if (section_type[section] != "blocked_domain") continue
+                    if (emitted++) printf ","
+                    printf "{\"id\":\"%s\",\"domain\":\"%s\",\"mode\":\"%s\",\"enabled\":\"%s\"}", \
+                        json_escape(section), \
+                        json_escape(option(section, "domain")), \
+                        json_escape(option(section, "mode")), \
+                        json_escape(option(section, "enabled"))
+                }
+                printf "]}"
+                exit
+            }
+
+            if (view == "status") {
+                up=0
+                down=0
+                unknown=0
+                for (index_no=1; index_no<=section_count; index_no++) {
+                    section=section_order[index_no]
+                    if (section_type[section] != "profile") continue
+                    status=(health_seen[section] && health_status[section] != "") ? health_status[section] : "unknown"
+                    if (status == "healthy") up++
+                    else if (status == "unknown") unknown++
+                    else down++
+                }
+                printf "{\"up\":%d,\"down\":%d,\"unknown\":%d", up, down, unknown
+                exit
+            }
+
+            if (view == "route_manifest") {
+                for (index_no=1; index_no<=section_count; index_no++) {
+                    section=section_order[index_no]
+                    if (section_type[section] != "profile") continue
+                    iface=option(section, "iface")
+                    printf "%s|{\"id\":\"%s\",\"name\":\"%s\",\"iface\":\"%s\",\"ip\":\n", \
+                        iface, \
+                        json_escape(section), \
+                        json_escape(option(section, "name")), \
+                        json_escape(iface)
+                }
+            }
+        }
+    ' "$health_file" "$snapshot_file"
+    snapshot_rc=$?
+    rm -f "$snapshot_file"
+    return "$snapshot_rc"
+}
+
+# Generate all UCI mutations for a large relationship scan in one batch. The
+# emitted section names originate from UCI itself; request values are used only
+# for exact comparisons and are never interpolated into batch commands.
+rpc_reference_batch() {
+    batch_mode="$1"
+    batch_keep_section="${2:-}"
+    batch_mac="${3:-}"
+    batch_ip="${4:-}"
+    snapshot_file="$VM_STATE_DIR/rpc-reference-snapshot.$$"
+
+    vm_init_dirs
+    rm -f "$snapshot_file"
+    if ! (umask 077; uci -q show "$VM_CFG" > "$snapshot_file" 2>/dev/null); then
+        rm -f "$snapshot_file"
+        return 1
+    fi
+
+    awk \
+        -v mode="$batch_mode" \
+        -v config="$VM_CFG" \
+        -v keep_section="$batch_keep_section" \
+        -v keep_mac="$batch_mac" \
+        -v keep_ip="$batch_ip" '
+        function uci_decode(input,    output, i, ch, quoted, pending_space, started) {
+            output=""
+            quoted=0
+            pending_space=0
+            started=0
+            for (i=1; i<=length(input); i++) {
+                ch=substr(input, i, 1)
+                if (quoted) {
+                    if (ch == "\047") {
+                        quoted=0
+                        started=1
+                    } else output=output ch
+                } else if (ch == "\047") {
+                    if (pending_space && started) output=output " "
+                    pending_space=0
+                    quoted=1
+                } else if (ch == "\\") {
+                    if (pending_space && started) output=output " "
+                    pending_space=0
+                    if (i < length(input)) output=output substr(input, ++i, 1)
+                    started=1
+                } else if (ch ~ /[[:space:]]/) {
+                    pending_space=1
+                } else {
+                    if (pending_space && started) output=output " "
+                    pending_space=0
+                    output=output ch
+                    started=1
+                }
+            }
+            return output
+        }
+
+        function option(section, name) {
+            return values[section SUBSEP name]
+        }
+
+        function remember_section(section) {
+            if (!(section in section_seen)) {
+                section_seen[section]=1
+                section_order[++section_count]=section
+            }
+        }
+
+        {
+            equals=index($0, "=")
+            if (equals == 0) next
+            left=substr($0, 1, equals-1)
+            prefix=config "."
+            if (substr(left, 1, length(prefix)) != prefix) next
+            path=substr(left, length(prefix)+1)
+            dot=index(path, ".")
+            decoded=uci_decode(substr($0, equals+1))
+            if (dot == 0) {
+                section=path
+                remember_section(section)
+                section_type[section]=decoded
+            } else {
+                section=substr(path, 1, dot-1)
+                name=substr(path, dot+1)
+                remember_section(section)
+                values[section SUBSEP name]=decoded
+            }
+        }
+
+        END {
+            for (index_no=1; index_no<=section_count; index_no++) {
+                section=section_order[index_no]
+                if (mode == "dedupe-policy") {
+                    if (section_type[section] != "device_policy" || section == keep_section) continue
+                    section_mac=tolower(option(section, "mac"))
+                    section_ip=option(section, "ip")
+                    if ((keep_mac != "" && section_mac == keep_mac) || (keep_ip != "" && section_ip == keep_ip)) {
+                        print "R:delete " config "." section
+                    }
+                } else if (mode == "delete-profile") {
+                    if (option(section, "target") != keep_section) continue
+                    if (section_type[section] == "device_policy") {
+                        print "R:set " config "." section ".target=\047wan\047"
+                    } else if (section_type[section] == "wifi_binding") {
+                        print "R:set " config "." section ".enabled=\0470\047"
+                        print "O:set wireless." section ".disabled=\0471\047"
+                    }
+                }
+            }
+        }
+    ' "$snapshot_file"
+    snapshot_rc=$?
+    rm -f "$snapshot_file"
+    return "$snapshot_rc"
+}
+
+rpc_apply_reference_batch() {
+    RPC_REFERENCE_WIRELESS_CHANGED=0
+    reference_commands="$(rpc_reference_batch "$@")" || return 1
+    [ -n "$reference_commands" ] || return 0
+    required_commands="$(printf '%s\n' "$reference_commands" | sed -n 's/^R://p')"
+    optional_commands="$(printf '%s\n' "$reference_commands" | sed -n 's/^O://p')"
+    reference_batch="$VM_STATE_DIR/rpc-reference-batch.$$"
+
+    if [ -n "$required_commands" ]; then
+        printf '%s\n' "$required_commands" > "$reference_batch"
+        if ! vm_uci_batch_checked "$reference_batch"; then
+            rm -f "$reference_batch"
+            uci -q revert "$VM_CFG" >/dev/null 2>&1 || true
+            return 1
+        fi
+    fi
+    if [ -n "$optional_commands" ]; then
+        printf '%s\n' "$optional_commands" > "$reference_batch"
+        if vm_uci_batch_checked "$reference_batch"; then
+            RPC_REFERENCE_WIRELESS_CHANGED=1
+        else
+            uci -q revert wireless >/dev/null 2>&1 || true
+        fi
+    fi
+    rm -f "$reference_batch"
+    return 0
+}
+
+RPC_CONFIG_LOCKED=0
+
+rpc_config_lock() {
+    if vm_config_lock; then
+        RPC_CONFIG_LOCKED=1
+        return 0
+    fi
+    echo '{"ok":false,"error":"configuration is busy; retry"}'
+    return 1
+}
+
+rpc_config_unlock() {
+    [ "$RPC_CONFIG_LOCKED" = "1" ] || return 0
+    vm_config_unlock
+    RPC_CONFIG_LOCKED=0
+}
+
+rpc_cleanup() {
+    rpc_config_unlock
+    rm -f "$VM_STATE_DIR/rpc-config-snapshot.$$" \
+        "$VM_STATE_DIR/rpc-reference-snapshot.$$" \
+        "$VM_STATE_DIR/rpc-reference-batch.$$" \
+        "$VM_STATE_DIR/import-normalized-$$.conf" \
+        "$VM_STATE_DIR/http-headers.$$" \
+        "$VM_STATE_DIR/http-body.$$" 2>/dev/null || true
+    rm -f "$VM_STATE_DIR"/multiebay-*-"$$".conf 2>/dev/null || true
+}
+
+trap 'rpc_cleanup' EXIT
+trap 'rpc_cleanup; exit 129' HUP
+trap 'rpc_cleanup; exit 130' INT
+trap 'rpc_cleanup; exit 143' TERM
 
 vm_ensure_jq() {
     if command -v jq >/dev/null 2>&1; then
@@ -419,10 +833,9 @@ multiebay_proxy_host() {
 }
 
 list_multiebay_settings() {
-    vm_global_ensure
-    api_base="$(vm_global_get multiebay_api_base)"
-    api_key="$(vm_global_get multiebay_api_key)"
-    allow_http_proxy="$(vm_global_get multiebay_allow_http_proxy)"
+    api_base="$(vm_global_get multiebay_api_base 2>/dev/null || true)"
+    api_key="$(vm_global_get multiebay_api_key 2>/dev/null || true)"
+    allow_http_proxy="$(vm_global_get multiebay_allow_http_proxy 2>/dev/null || true)"
     api_key_saved="false"
     [ -n "$api_key" ] && api_key_saved="true"
 
@@ -441,10 +854,11 @@ save_multiebay_settings() {
     api_key="$3"
     allow_http_proxy="$4"
 
-    vm_global_ensure
     [ -n "$api_base" ] || api_base="https://multiebay.com"
     [ -n "$allow_http_proxy" ] || allow_http_proxy="1"
 
+    rpc_config_lock || return
+    vm_global_ensure
     vm_global_set multiebay_api_base "$api_base"
     vm_global_set multiebay_allow_http_proxy "$allow_http_proxy"
     if [ -n "$api_key" ]; then
@@ -452,19 +866,21 @@ save_multiebay_settings() {
     fi
 
     uci commit vpn-manager
+    rpc_config_unlock
     echo '{"ok":true}'
 }
 
 clear_multiebay_api_key() {
+    rpc_config_lock || return
     vm_global_ensure
     uci -q delete vpn-manager.global.multiebay_api_key
     uci commit vpn-manager
+    rpc_config_unlock
     echo '{"ok":true}'
 }
 
 list_software_api_settings() {
-    vm_global_ensure
-    api_key="$(vm_global_get software_api_key)"
+    api_key="$(vm_global_get software_api_key 2>/dev/null || true)"
     api_key_saved="false"
     [ -n "$api_key" ] && api_key_saved="true"
 
@@ -476,35 +892,40 @@ list_software_api_settings() {
 save_software_api_key() {
     api_key="$2"
 
-    vm_global_ensure
     [ -n "$api_key" ] || {
         echo '{"ok":false,"error":"api key is required"}'
         return
     }
 
+    rpc_config_lock || return
+    vm_global_ensure
     vm_global_set software_api_key "$api_key"
     uci commit vpn-manager
+    rpc_config_unlock
     echo '{"ok":true}'
 }
 
 clear_software_api_key() {
+    rpc_config_lock || return
     vm_global_ensure
     uci -q delete vpn-manager.global.software_api_key
     uci commit vpn-manager
+    rpc_config_unlock
     echo '{"ok":true}'
 }
 
 rotate_software_api_key() {
-    vm_global_ensure
-
     new_key="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40)"
     [ -n "$new_key" ] || {
         echo '{"ok":false,"error":"unable to generate api key"}'
         return
     }
 
+    rpc_config_lock || return
+    vm_global_ensure
     vm_global_set software_api_key "$new_key"
     uci commit vpn-manager
+    rpc_config_unlock
     printf '{"ok":true,"api_key":"%s"}' "$(json_escape "$new_key")"
 }
 
@@ -517,78 +938,101 @@ lookup_public_ip() {
     fi
 }
 
-vm_profile_status_from_age() {
-    iface="$1"
-    age="$2"
-    max_age="${3:-180}"
-
-    ip link show dev "$iface" >/dev/null 2>&1 || {
-        echo "down"
-        return
-    }
-
-    link_line="$(ip link show dev "$iface" 2>/dev/null | head -n1)"
-    echo "$link_line" | grep -q '<[^>]*UP[^>]*>' || {
-        echo "down"
-        return
-    }
-
-    if [ "$age" -le "$max_age" ]; then
-        echo "healthy"
-        return
-    fi
-
-    if vm_ping_iface "$iface"; then
-        echo "degraded"
+route_status() {
+    cache_file="$VM_STATE_DIR/route-status-cache.json"
+    vm_init_dirs
+    if [ -s "$cache_file" ]; then
+        cat "$cache_file"
     else
-        echo "down"
+        echo '{"ok":true,"wan":{"success":false,"pending":true},"profiles":[],"refreshing":true}'
     fi
 }
 
-route_status() {
+refresh_route_status() {
     cache_file="$VM_STATE_DIR/route-status-cache.json"
-    cache_ttl="${VM_ROUTE_STATUS_TTL:-20}"
+    work="$VM_STATE_DIR/route-status-work.$$"
+    tmp_file="$VM_STATE_DIR/route-status-cache.$$.json"
+    workers="${VM_ROUTE_STATUS_WORKERS:-4}"
+    active=0
+    pids=""
+    index=0
 
     vm_init_dirs
-    if [ -f "$cache_file" ]; then
-        now="$(date +%s)"
-        mtime="$(date -r "$cache_file" +%s 2>/dev/null || echo 0)"
-        if [ $((now - mtime)) -lt "$cache_ttl" ]; then
-            cat "$cache_file"
-            return
-        fi
+    lock -n "$VM_STATE_DIR/route-status.lock" 2>/dev/null || return 0
+    trap 'lock -u "$VM_STATE_DIR/route-status.lock" 2>/dev/null || true; rm -rf "$work"; rpc_cleanup' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    mkdir -p "$work"
+    if ! rpc_snapshot_json route_manifest > "$work/profiles.manifest"; then
+        return 1
     fi
 
-    tmp_file="$VM_STATE_DIR/route-status-$$.json"
-    payload="$({
-        printf '{"ok":true,"wan":'
+    (
         wan_json="$(lookup_public_ip "")"
-        if [ -n "$wan_json" ]; then
-            printf '%s' "$wan_json"
-        else
-            printf '{"success":false}'
-        fi
+        [ -n "$wan_json" ] || wan_json='{"success":false}'
+        printf '%s' "$wan_json" > "$work/wan.json"
+    ) &
+    pids="$!"
+    active=1
 
-        printf ',"profiles":['
-        first=1
-        for sec in $(vm_profile_list); do
-            [ $first -eq 1 ] || printf ','
-            first=0
-            iface="$(uci -q get vpn-manager.$sec.iface)"
+    while IFS='|' read -r iface profile_prefix; do
+        [ -n "$iface" ] || continue
+        index=$((index + 1))
+        output="$work/profile.$(printf '%06d' "$index").json"
+        (
             ip_json="$(lookup_public_ip "$iface")"
             [ -n "$ip_json" ] || ip_json='{"success":false}'
-            printf '{"id":"%s","name":"%s","iface":"%s","ip":%s}' \
-                "$sec" \
-                "$(json_escape "$(uci -q get vpn-manager.$sec.name)")" \
-                "$(json_escape "$iface")" \
-                "$ip_json"
-        done
-        printf ']}'
-    })"
+            printf '%s%s}' "$profile_prefix" "$ip_json" > "$output"
+        ) &
+        pids="$pids $!"
+        active=$((active + 1))
 
-    printf '%s' "$payload"
-    printf '%s' "$payload" > "$tmp_file" 2>/dev/null || true
-    [ -s "$tmp_file" ] && mv "$tmp_file" "$cache_file" || rm -f "$tmp_file"
+        if [ "$active" -ge "$workers" ]; then
+            for pid in $pids; do wait "$pid" 2>/dev/null || true; done
+            pids=""
+            active=0
+        fi
+    done < "$work/profiles.manifest"
+    for pid in $pids; do wait "$pid" 2>/dev/null || true; done
+
+    {
+        printf '{"ok":true,"wan":'
+        cat "$work/wan.json" 2>/dev/null || printf '{"success":false}'
+        printf ',"profiles":['
+        first=1
+        for output in "$work"/profile.*.json; do
+            [ -f "$output" ] || continue
+            [ $first -eq 1 ] || printf ','
+            first=0
+            cat "$output"
+        done
+        printf '],"refreshing":false,"updated_at":%s}' "$(date +%s)"
+    } > "$tmp_file"
+
+    if [ ! -s "$tmp_file" ] \
+        || ! vm_ensure_jq \
+        || ! jq -e '
+            type == "object" and
+            .ok == true and
+            (.wan | type) == "object" and
+            (.profiles | type) == "array" and
+            all(.profiles[];
+                type == "object" and
+                (.id | type) == "string" and
+                (.name | type) == "string" and
+                (.iface | type) == "string" and
+                (.ip | type) == "object"
+            )
+        ' "$tmp_file" >/dev/null 2>&1; then
+        rm -f "$tmp_file"
+        return 1
+    fi
+
+    mv "$tmp_file" "$cache_file" || {
+        rm -f "$tmp_file"
+        return 1
+    }
 }
 
 vm_wifi_binding_pick_radio() {
@@ -622,7 +1066,9 @@ list_wifi_bindings() {
         enabled="$(uci -q get vpn-manager.$sec.enabled)"
         subnet_id="$(uci -q get vpn-manager.$sec.subnet_id)"
         network_name="$(uci -q get vpn-manager.$sec.network)"
-        radio="$(uci -q get wireless.$sec.device)"
+        wifi_section="$(uci -q get vpn-manager.$sec.wifi_section)"
+        [ -n "$wifi_section" ] || wifi_section="$sec"
+        radio="$(uci -q get wireless.$wifi_section.device)"
         gateway="$(uci -q get network.$network_name.ipaddr)"
         dns_ip=""
         target_iface=""
@@ -635,7 +1081,7 @@ list_wifi_bindings() {
         if vm_profile_exists "$target"; then
             target_iface="$(uci -q get vpn-manager.$target.iface)"
             dns_ip="$(vm_first_ipv4 "$(uci -q get vpn-manager.$target.dns)")"
-            status="$(vm_profile_health "$target_iface" "180" || true)"
+            status="$(vm_profile_health_cached "$target")"
         fi
 
         printf '{"id":"%s","ssid":"%s","key":"%s","encryption":"%s","target":"%s","target_iface":"%s","enabled":"%s","subnet_id":"%s","subnet":"%s","network":"%s","gateway":"%s","dns":"%s","radio":"%s","status":"%s"}' \
@@ -666,18 +1112,50 @@ save_wifi_binding() {
     target="$6"
     enabled="$7"
 
+    case "$sec" in
+        *[!A-Za-z0-9_]*)
+            echo '{"ok":false,"error":"binding id may contain only letters, numbers, and underscore"}'
+            return
+            ;;
+    esac
+    [ "${#sec}" -le 32 ] || {
+        echo '{"ok":false,"error":"binding id must be 32 characters or fewer"}'
+        return
+    }
     [ -n "$ssid" ] || {
         echo '{"ok":false,"error":"ssid is required"}'
         return
     }
+    [ "${#ssid}" -le 32 ] || {
+        echo '{"ok":false,"error":"ssid must be 32 characters or fewer"}'
+        return
+    }
+    case "${encryption:-sae-mixed}" in
+        none) ;;
+        psk2|sae|sae-mixed)
+            [ "${#key}" -ge 8 ] && [ "${#key}" -le 63 ] || {
+                echo '{"ok":false,"error":"wifi password must contain 8 to 63 characters"}'
+                return
+            }
+            ;;
+        *)
+            echo '{"ok":false,"error":"unsupported wifi encryption"}'
+            return
+            ;;
+    esac
+    case "${enabled:-1}" in
+        0|1) ;;
+        *)
+            echo '{"ok":false,"error":"invalid enabled value"}'
+            return
+            ;;
+    esac
 
     target="$(vm_wifi_binding_target_profile "$target" 2>/dev/null || true)"
     [ -n "$target" ] || {
         echo '{"ok":false,"error":"target profile not found"}'
         return
     }
-
-    [ -n "$sec" ] || sec="wifi_$(echo "$ssid" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//' | cut -c1-20)_$(date +%H%M%S)"
 
     radio="$(vm_wifi_binding_radio_for_default_iface)"
     [ -n "$radio" ] || radio="$(vm_wifi_binding_pick_radio)"
@@ -686,22 +1164,85 @@ save_wifi_binding() {
         return
     }
 
+    rpc_config_lock || return
     if vm_wifi_binding_exists "$sec"; then
+        [ "$(uci -q get vpn-manager.$sec)" = "wifi_binding" ] || {
+            rpc_config_unlock
+            echo '{"ok":false,"error":"binding id conflicts with another VPN Manager section"}'
+            return
+        }
         subnet_id="$(uci -q get vpn-manager.$sec.subnet_id)"
         network_name="$(uci -q get vpn-manager.$sec.network)"
+        wifi_section="$(uci -q get vpn-manager.$sec.wifi_section)"
     else
-        subnet_id="$(vm_wifi_binding_next_subnet_id)"
-        network_name="$sec"
-        uci set "vpn-manager.$sec=wifi_binding"
+        subnet_id="$(vm_wifi_binding_next_subnet_id 2>/dev/null || true)"
+        [ -n "$subnet_id" ] || {
+            rpc_config_unlock
+            echo '{"ok":false,"error":"no free dedicated wifi subnet"}'
+            return
+        }
+        [ -n "$sec" ] || sec="wifi_$subnet_id"
+        vm_wifi_binding_exists "$sec" && {
+            rpc_config_unlock
+            echo '{"ok":false,"error":"binding id already exists"}'
+            return
+        }
+        network_name="$(vm_wifi_binding_network_name "$subnet_id")"
+        wifi_section="$(vm_wifi_binding_wireless_section "$subnet_id")"
     fi
 
-    [ -n "$subnet_id" ] || subnet_id="$(vm_wifi_binding_next_subnet_id)"
-    [ -n "$network_name" ] || network_name="$sec"
+    [ -n "$subnet_id" ] || subnet_id="$(vm_wifi_binding_next_subnet_id 2>/dev/null || true)"
+    [ -n "$network_name" ] || network_name="$(vm_wifi_binding_network_name "$subnet_id")"
+    [ -n "$wifi_section" ] || wifi_section="$(vm_wifi_binding_wireless_section "$subnet_id")"
+
+    expected_network="$(vm_wifi_binding_network_name "$subnet_id")"
+    expected_wifi_section="$(vm_wifi_binding_wireless_section "$subnet_id")"
+    if [ "$network_name" != "$expected_network" ] || [ "$wifi_section" != "$expected_wifi_section" ]; then
+        rpc_config_unlock
+        echo '{"ok":false,"error":"legacy dedicated wifi names are unsafe; delete and recreate this binding"}'
+        return
+    fi
+
+    for resource in \
+        "network:$network_name" \
+        "network:${network_name}_dev" \
+        "wireless:$wifi_section" \
+        "dhcp:$network_name" \
+        "firewall:$network_name"
+    do
+        package="${resource%%:*}"
+        section="${resource#*:}"
+        if uci -q get "$package.$section" >/dev/null 2>&1 \
+            && [ "$(uci -q get "$package.$section.vpn_manager")" != "1" ]; then
+            rpc_config_unlock
+            printf '{"ok":false,"error":"dedicated wifi resource conflicts with existing %s.%s"}' "$package" "$section"
+            return
+        fi
+    done
+
+    checkpoint=""
+    if [ -s "$VM_NETWORK_CHANGE_CHECKPOINT" ]; then
+        checkpoint="$(cat "$VM_NETWORK_CHANGE_CHECKPOINT" 2>/dev/null || true)"
+        vm_checkpoint_valid "$checkpoint" || checkpoint=""
+    fi
+    if [ -z "$checkpoint" ]; then
+        checkpoint="$(vm_checkpoint_create 2>/dev/null || true)"
+        [ -n "$checkpoint" ] || {
+            rpc_config_unlock
+            echo '{"ok":false,"error":"unable to create safety checkpoint"}'
+            return
+        }
+        printf '%s\n' "$checkpoint" > "$VM_NETWORK_CHANGE_CHECKPOINT"
+        chmod 600 "$VM_NETWORK_CHANGE_CHECKPOINT" 2>/dev/null || true
+    fi
 
     gateway="$(vm_wifi_binding_gateway "$subnet_id")"
     dns_ip="$(vm_first_ipv4 "$(uci -q get vpn-manager.$target.dns)")"
     [ -n "$dns_ip" ] || dns_ip="$gateway"
 
+    if ! (
+    set -e
+    uci set "vpn-manager.$sec=wifi_binding"
     uci set "vpn-manager.$sec.enabled=${enabled:-1}"
     uci set "vpn-manager.$sec.ssid=$ssid"
     uci set "vpn-manager.$sec.key=$key"
@@ -709,28 +1250,31 @@ save_wifi_binding() {
     uci set "vpn-manager.$sec.target=$target"
     uci set "vpn-manager.$sec.subnet_id=$subnet_id"
     uci set "vpn-manager.$sec.network=$network_name"
+    uci set "vpn-manager.$sec.wifi_section=$wifi_section"
 
-    uci -q delete "wireless.$sec"
-    uci set "wireless.$sec=wifi-iface"
-    uci set "wireless.$sec.device=$radio"
-    uci set "wireless.$sec.mode=ap"
-    uci set "wireless.$sec.network=$network_name"
-    uci set "wireless.$sec.ssid=$ssid"
-    uci set "wireless.$sec.encryption=${encryption:-sae-mixed}"
+    uci -q delete "wireless.$wifi_section" || true
+    uci set "wireless.$wifi_section=wifi-iface"
+    uci set "wireless.$wifi_section.vpn_manager=1"
+    uci set "wireless.$wifi_section.device=$radio"
+    uci set "wireless.$wifi_section.mode=ap"
+    uci set "wireless.$wifi_section.network=$network_name"
+    uci set "wireless.$wifi_section.ssid=$ssid"
+    uci set "wireless.$wifi_section.encryption=${encryption:-sae-mixed}"
     if [ "${encryption:-sae-mixed}" != "none" ] && [ -n "$key" ]; then
-        uci set "wireless.$sec.key=$key"
+        uci set "wireless.$wifi_section.key=$key"
     else
-        uci -q delete "wireless.$sec.key"
+        uci -q delete "wireless.$wifi_section.key" || true
     fi
-    uci set "wireless.$sec.isolate=1"
+    uci set "wireless.$wifi_section.isolate=1"
     if [ "${enabled:-1}" = "0" ]; then
-        uci set "wireless.$sec.disabled=1"
+        uci set "wireless.$wifi_section.disabled=1"
     else
-        uci set "wireless.$sec.disabled=0"
+        uci set "wireless.$wifi_section.disabled=0"
     fi
 
-    uci -q delete "network.$network_name"
+    uci -q delete "network.$network_name" || true
     uci set "network.$network_name=interface"
+    uci set "network.$network_name.vpn_manager=1"
     uci set "network.$network_name.proto=static"
     uci set "network.$network_name.device=br-$network_name"
     uci set "network.$network_name.ipaddr=$gateway"
@@ -738,14 +1282,16 @@ save_wifi_binding() {
     uci set "network.$network_name.defaultroute=0"
     uci set "network.$network_name.delegate=0"
 
-    uci -q delete "network.${network_name}_dev"
+    uci -q delete "network.${network_name}_dev" || true
     uci set "network.${network_name}_dev=device"
+    uci set "network.${network_name}_dev.vpn_manager=1"
     uci set "network.${network_name}_dev.name=br-$network_name"
     uci set "network.${network_name}_dev.type=bridge"
     uci set "network.${network_name}_dev.bridge_empty=1"
 
-    uci -q delete "dhcp.$network_name"
+    uci -q delete "dhcp.$network_name" || true
     uci set "dhcp.$network_name=dhcp"
+    uci set "dhcp.$network_name.vpn_manager=1"
     uci set "dhcp.$network_name.interface=$network_name"
     uci set "dhcp.$network_name.start=100"
     uci set "dhcp.$network_name.limit=100"
@@ -756,8 +1302,9 @@ save_wifi_binding() {
     uci add_list "dhcp.$network_name.dhcp_option=3,$gateway"
     uci add_list "dhcp.$network_name.dhcp_option=6,$dns_ip"
 
-    uci -q delete "firewall.$network_name"
+    uci -q delete "firewall.$network_name" || true
     uci set "firewall.$network_name=zone"
+    uci set "firewall.$network_name.vpn_manager=1"
     uci set "firewall.$network_name.name=$network_name"
     uci add_list "firewall.$network_name.network=$network_name"
     uci set "firewall.$network_name.input=ACCEPT"
@@ -771,11 +1318,27 @@ save_wifi_binding() {
     uci commit network
     uci commit dhcp
     uci commit firewall
+    ); then
+        vm_checkpoint_restore_config "$checkpoint" >/dev/null 2>&1 || true
+        rm -f "$VM_NETWORK_CHANGE_CHECKPOINT"
+        rpc_config_unlock
+        echo '{"ok":false,"error":"unable to save dedicated wifi safely"}'
+        return
+    fi
 
-    wifi reload >/dev/null 2>&1 || /etc/init.d/network reload >/dev/null 2>&1 || true
-    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
-    /etc/init.d/firewall restart >/dev/null 2>&1 || true
-    echo '{"ok":true}'
+    rpc_config_unlock
+    if ! vm_apply_request network wifi-binding-save; then
+        rpc_config_lock || {
+            echo '{"ok":false,"error":"wifi saved but apply queue is busy; safety rollback remains armed"}'
+            return
+        }
+        vm_checkpoint_restore_config "$checkpoint" >/dev/null 2>&1 || true
+        rm -f "$VM_NETWORK_CHANGE_CHECKPOINT"
+        rpc_config_unlock
+        echo '{"ok":false,"error":"unable to queue dedicated wifi apply; configuration restored"}'
+        return
+    fi
+    echo '{"ok":true,"queued":true,"job":"network"}'
 }
 
 delete_wifi_binding() {
@@ -790,26 +1353,63 @@ delete_wifi_binding() {
         return
     }
 
+    rpc_config_lock || return
     network_name="$(uci -q get vpn-manager.$sec.network)"
+    wifi_section="$(uci -q get vpn-manager.$sec.wifi_section)"
     [ -n "$network_name" ] || network_name="$sec"
+    [ -n "$wifi_section" ] || wifi_section="$sec"
 
+    checkpoint=""
+    if [ -s "$VM_NETWORK_CHANGE_CHECKPOINT" ]; then
+        checkpoint="$(cat "$VM_NETWORK_CHANGE_CHECKPOINT" 2>/dev/null || true)"
+        vm_checkpoint_valid "$checkpoint" || checkpoint=""
+    fi
+    if [ -z "$checkpoint" ]; then
+        checkpoint="$(vm_checkpoint_create 2>/dev/null || true)"
+        [ -n "$checkpoint" ] || {
+            rpc_config_unlock
+            echo '{"ok":false,"error":"unable to create safety checkpoint"}'
+            return
+        }
+        printf '%s\n' "$checkpoint" > "$VM_NETWORK_CHANGE_CHECKPOINT"
+        chmod 600 "$VM_NETWORK_CHANGE_CHECKPOINT" 2>/dev/null || true
+    fi
+
+    if ! (
+    set -e
     uci -q delete "vpn-manager.$sec"
-    uci -q delete "wireless.$sec"
-    uci -q delete "network.$network_name"
-    uci -q delete "network.${network_name}_dev"
-    uci -q delete "dhcp.$network_name"
-    uci -q delete "firewall.$network_name"
+    [ "$(uci -q get wireless.$wifi_section.vpn_manager)" != "1" ] || uci -q delete "wireless.$wifi_section"
+    [ "$(uci -q get network.$network_name.vpn_manager)" != "1" ] || uci -q delete "network.$network_name"
+    [ "$(uci -q get network.${network_name}_dev.vpn_manager)" != "1" ] || uci -q delete "network.${network_name}_dev"
+    [ "$(uci -q get dhcp.$network_name.vpn_manager)" != "1" ] || uci -q delete "dhcp.$network_name"
+    [ "$(uci -q get firewall.$network_name.vpn_manager)" != "1" ] || uci -q delete "firewall.$network_name"
 
     uci commit vpn-manager
     uci commit wireless
     uci commit network
     uci commit dhcp
     uci commit firewall
+    ); then
+        vm_checkpoint_restore_config "$checkpoint" >/dev/null 2>&1 || true
+        rm -f "$VM_NETWORK_CHANGE_CHECKPOINT"
+        rpc_config_unlock
+        echo '{"ok":false,"error":"unable to delete dedicated wifi safely"}'
+        return
+    fi
 
-    wifi reload >/dev/null 2>&1 || /etc/init.d/network reload >/dev/null 2>&1 || true
-    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
-    /etc/init.d/firewall restart >/dev/null 2>&1 || true
-    echo '{"ok":true}'
+    rpc_config_unlock
+    if ! vm_apply_request network wifi-binding-delete; then
+        rpc_config_lock || {
+            echo '{"ok":false,"error":"wifi deleted but apply queue is busy; safety rollback remains armed"}'
+            return
+        }
+        vm_checkpoint_restore_config "$checkpoint" >/dev/null 2>&1 || true
+        rm -f "$VM_NETWORK_CHANGE_CHECKPOINT"
+        rpc_config_unlock
+        echo '{"ok":false,"error":"unable to queue dedicated wifi delete; configuration restored"}'
+        return
+    fi
+    echo '{"ok":true,"queued":true,"job":"network"}'
 }
 
 list_wifi() {
@@ -857,6 +1457,7 @@ set_wifi() {
     }
     device="$(uci -q get wireless.$iface.device)"
 
+    rpc_config_lock || return
     [ -n "$ssid" ] && uci set "wireless.$iface.ssid=$ssid"
     [ -n "$encryption" ] && uci set "wireless.$iface.encryption=$encryption"
     [ -n "$key" ] && uci set "wireless.$iface.key=$key"
@@ -871,56 +1472,59 @@ set_wifi() {
     fi
 
     uci commit wireless
-    wifi reload >/dev/null 2>&1 || /etc/init.d/network reload >/dev/null 2>&1 || true
-    echo '{"ok":true}'
+    rpc_config_unlock
+    vm_apply_request network wifi-settings
+    echo '{"ok":true,"queued":true,"job":"network"}'
 }
 
 list_profiles() {
-    printf '{"profiles":['
-    first=1
-    for sec in $(vm_profile_list); do
-        [ $first -eq 1 ] || printf ','
-        first=0
-        name="$(uci -q get vpn-manager.$sec.name)"
-        iface="$(uci -q get vpn-manager.$sec.iface)"
-        endpoint="$(uci -q get vpn-manager.$sec.endpoint_host):$(uci -q get vpn-manager.$sec.endpoint_port)"
-        enabled="$(uci -q get vpn-manager.$sec.enabled)"
-        address="$(uci -q get vpn-manager.$sec.address)"
-        dns="$(uci -q get vpn-manager.$sec.dns)"
-        allowed_ips="$(uci -q get vpn-manager.$sec.allowed_ips)"
-        mtu="$(uci -q get vpn-manager.$sec.mtu)"
-        keepalive="$(uci -q get vpn-manager.$sec.persistent_keepalive)"
-        public_key="$(uci -q get vpn-manager.$sec.public_key)"
-        hs_age="$(vm_handshake_age "$iface")"
-        status="$(vm_profile_status_from_age "$iface" "$hs_age" "180")"
-        printf '{"id":"%s","name":"%s","iface":"%s","endpoint":"%s","enabled":"%s","status":"%s","handshake_age":"%s","address":"%s","dns":"%s","allowed_ips":"%s","mtu":"%s","persistent_keepalive":"%s","public_key":"%s"}' \
-            "$sec" "$(json_escape "$name")" "$iface" "$endpoint" "$enabled" "$status" "$hs_age" "$(json_escape "$address")" "$(json_escape "$dns")" "$(json_escape "$allowed_ips")" "$mtu" "$keepalive" "$(json_escape "$public_key")"
-    done
-    printf ']}'
+    rpc_snapshot_json profiles || echo '{"ok":false,"error":"unable to read configuration"}'
 }
 
 list_devices() {
-    local tmp
+    local tmp obj mac
     tmp="/tmp/vpn-manager/devices.$$"
 
     {
         awk '{print "dhcp|"$3"|"tolower($2)"|"$4"|unknown"}' /tmp/dhcp.leases 2>/dev/null
-        ip neigh show dev br-lan 2>/dev/null | awk '
+        ip -4 neigh show 2>/dev/null | awk '
             /lladdr/ {
-                ip=$1; mac=""; st="unknown";
+                ip=$1; dev=""; mac=""; st="unknown";
                 for (i=1; i<=NF; i++) {
+                    if ($i=="dev" && (i+1)<=NF) { dev=$(i+1); }
                     if ($i=="lladdr" && (i+1)<=NF) { mac=tolower($(i+1)); }
                 }
                 st=$NF;
-                if (ip ~ /^[0-9]+\./ && mac != "" && mac != "00:00:00:00:00:00") {
+                if (ip ~ /^[0-9]+\./ && dev ~ /^br-/ && dev !~ /(^|[-_.])wan($|[-_.])/ && mac != "" && mac != "00:00:00:00:00:00") {
                     print "neigh|" ip "|" mac "|unknown|" st;
                 }
             }
         '
+
+        # hostapd is authoritative for Wi-Fi association state and updates as
+        # soon as a station joins or leaves. Keep the neighbor table as the
+        # lightweight fallback for Ethernet and non-hostapd LAN bridges.
+        if command -v ubus >/dev/null 2>&1; then
+            for obj in $(ubus list 'hostapd.*' 2>/dev/null); do
+                ubus call "$obj" get_clients 2>/dev/null |
+                    sed -n 's/^[[:space:]]*"\([0-9A-Fa-f:]*\)"[[:space:]]*:.*/\1/p' |
+                    grep -Ei '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$' |
+                    while IFS= read -r mac; do
+                        printf 'wifi||%s|unknown|associated\n' "$(printf '%s' "$mac" | tr 'A-Z' 'a-z')"
+                    done
+            done
+        fi
     } | awk -F'\|' '
         NF>=5 {
             src=$1; ip=$2; mac=tolower($3); host=$4; st=tolower($5);
-            if (mac == "" || ip == "") next;
+            if (mac == "") next;
+
+            if (src == "wifi") {
+                wifi_by_mac[mac]=1;
+                next;
+            }
+
+            if (ip == "") next;
             if (!(mac in ip_by_mac) || source_by_mac[mac] == "arp") {
                 ip_by_mac[mac]=ip;
             }
@@ -943,7 +1547,12 @@ list_devices() {
             for (mac in ip_by_mac) {
                 host=(mac in host_by_mac)?host_by_mac[mac]:"unknown";
                 st=(mac in state_by_mac)?state_by_mac[mac]:"unknown";
-                conn=((st=="reachable" || st=="delay" || st=="probe" || st=="permanent")?"true":"false");
+                if (mac in wifi_by_mac) {
+                    st="associated";
+                    conn="true";
+                } else {
+                    conn=((st=="reachable" || st=="stale" || st=="delay" || st=="probe" || st=="permanent")?"true":"false");
+                }
                 print ip_by_mac[mac] "|" mac "|" host "|" st "|" conn;
             }
         }
@@ -965,34 +1574,186 @@ list_devices() {
 }
 
 list_policies() {
-    printf '{"policies":['
+    rpc_snapshot_json policies || echo '{"ok":false,"error":"unable to read configuration"}'
+}
+
+list_blocked_domains() {
+    rpc_snapshot_json blocked_domains || echo '{"ok":false,"error":"unable to read configuration"}'
+}
+
+http_debug_status() {
+    enabled="$(vm_global_get http_debug_enabled 2>/dev/null || true)"
+    [ "$enabled" = "1" ] || enabled="0"
+    binary_ready=false
+    running=false
+    ca_ready=false
+    [ -x /usr/sbin/squid ] && [ -x /usr/lib/squid/security_file_certgen ] && binary_ready=true
+    for proc in /proc/[0-9]*; do
+        [ -r "$proc/cmdline" ] || continue
+        [ "$(readlink "$proc/exe" 2>/dev/null || true)" = "/usr/sbin/squid" ] || continue
+        proxy_cmd="$(tr '\000' ' ' < "$proc/cmdline" 2>/dev/null || true)"
+        case "$proxy_cmd" in
+            *'/usr/sbin/squid -n vpnmanagerhttpdebug '*) running=true; break ;;
+        esac
+    done
+    [ -s /etc/vpn-manager/mitmproxy/mitmproxy-ca-cert.pem ] && ca_ready=true
+
+    printf '{"ok":true,"mode":"transparent","enabled":"%s","binary_ready":%s,"running":%s,"ca_ready":%s,"clients":[' \
+        "$enabled" "$binary_ready" "$running" "$ca_ready"
     first=1
-    for sec in $(uci -q show vpn-manager | sed -n 's/^vpn-manager\.\([^.=]*\)=device_policy$/\1/p'); do
+    for sec in $(vm_http_debug_client_list); do
         [ $first -eq 1 ] || printf ','
         first=0
-        printf '{"section":"%s","hostname":"%s","mac":"%s","ip":"%s","target":"%s"}' \
-            "$sec" \
-            "$(json_escape "$(uci -q get vpn-manager.$sec.hostname)")" \
-            "$(uci -q get vpn-manager.$sec.mac)" \
-            "$(uci -q get vpn-manager.$sec.ip)" \
-            "$(uci -q get vpn-manager.$sec.target)"
+        printf '{"id":"%s","hostname":"%s","mac":"%s","ip":"%s","enabled":"%s"}' \
+            "$(json_escape "$sec")" \
+            "$(json_escape "$(uci -q get "vpn-manager.$sec.hostname" 2>/dev/null || true)")" \
+            "$(json_escape "$(uci -q get "vpn-manager.$sec.mac" 2>/dev/null || true)")" \
+            "$(json_escape "$(uci -q get "vpn-manager.$sec.ip" 2>/dev/null || true)")" \
+            "$(json_escape "$(uci -q get "vpn-manager.$sec.enabled" 2>/dev/null || true)")"
+    done
+    printf '],"rules":['
+    first=1
+    for sec in $(vm_blocked_url_list); do
+        [ $first -eq 1 ] || printf ','
+        first=0
+        printf '{"id":"%s","protocol":"%s","host":"%s","method":"%s","path":"%s","enabled":"%s"}' \
+            "$(json_escape "$sec")" \
+            "$(json_escape "$(uci -q get "vpn-manager.$sec.protocol" 2>/dev/null || true)")" \
+            "$(json_escape "$(uci -q get "vpn-manager.$sec.host" 2>/dev/null || true)")" \
+            "$(json_escape "$(uci -q get "vpn-manager.$sec.method" 2>/dev/null || true)")" \
+            "$(json_escape "$(uci -q get "vpn-manager.$sec.path" 2>/dev/null || true)")" \
+            "$(json_escape "$(uci -q get "vpn-manager.$sec.enabled" 2>/dev/null || true)")"
     done
     printf ']}'
 }
 
-list_blocked_domains() {
-    printf '{"ok":true,"domains":['
+http_debug_log() {
+    log_file="/var/log/vpn-manager/http-debug/access.log"
+    printf '{"ok":true,"lines":['
     first=1
-    for sec in $(vm_blocked_domain_list); do
+    tail -n 200 "$log_file" 2>/dev/null | while IFS= read -r line; do
         [ $first -eq 1 ] || printf ','
         first=0
-        printf '{"id":"%s","domain":"%s","mode":"%s","enabled":"%s"}' \
-            "$sec" \
-            "$(json_escape "$(uci -q get vpn-manager.$sec.domain)")" \
-            "$(json_escape "$(uci -q get vpn-manager.$sec.mode)")" \
-            "$(uci -q get vpn-manager.$sec.enabled)"
+        printf '"%s"' "$(json_escape "$line")"
     done
     printf ']}'
+}
+
+save_http_debug_settings() {
+    enabled="$2"
+    [ "$enabled" = "1" ] || enabled="0"
+    rpc_config_lock || return
+    vm_global_ensure
+    vm_global_set http_debug_enabled "$enabled"
+    uci commit vpn-manager
+    rpc_config_unlock
+    echo '{"ok":true}'
+}
+
+save_http_debug_client() {
+    sec="$2"
+    mac="$(normalize_mac "$3")"
+    ip="$4"
+    hostname="$5"
+    enabled="$6"
+
+    [ -n "$mac" ] && rpc_valid_mac "$mac" || {
+        echo '{"ok":false,"error":"valid MAC address is required"}'
+        return
+    }
+    rpc_valid_ipv4 "$ip" || {
+        echo '{"ok":false,"error":"valid IPv4 address is required"}'
+        return
+    }
+    [ "$enabled" = "0" ] || enabled="1"
+    [ -n "$sec" ] || sec="http_$(printf '%s' "$mac" | tr -d ':' | cut -c1-12)"
+
+    rpc_config_lock || return
+    uci set "vpn-manager.$sec=http_debug_client"
+    uci set "vpn-manager.$sec.mac=$mac"
+    uci set "vpn-manager.$sec.ip=$ip"
+    uci set "vpn-manager.$sec.hostname=$hostname"
+    uci set "vpn-manager.$sec.enabled=$enabled"
+    uci commit vpn-manager
+    rpc_config_unlock
+    printf '{"ok":true,"id":"%s"}' "$(json_escape "$sec")"
+}
+
+delete_http_debug_client() {
+    sec="$2"
+    vm_http_debug_client_exists "$sec" || {
+        echo '{"ok":false,"error":"HTTP debug client not found"}'
+        return
+    }
+    rpc_config_lock || return
+    uci -q delete "vpn-manager.$sec"
+    uci commit vpn-manager
+    rpc_config_unlock
+    echo '{"ok":true}'
+}
+
+save_blocked_url() {
+    sec="$2"
+    input="$3"
+    method="$(printf '%s' "$4" | tr 'a-z' 'A-Z')"
+    enabled="$5"
+
+    case "$input" in
+        http://*) protocol=http; rest="${input#http://}" ;;
+        https://*) protocol=https; rest="${input#https://}" ;;
+        *) echo '{"ok":false,"error":"URL must start with http:// or https://"}'; return ;;
+    esac
+    host="${rest%%/*}"
+    if [ "$host" = "$rest" ]; then
+        url_path='/*'
+    else
+        url_path="/${rest#*/}"
+        url_path="${url_path%%\?*}"
+        [ -n "$url_path" ] || url_path='/'
+    fi
+    host="$(printf '%s' "$host" | tr 'A-Z' 'a-z')"
+    printf '%s\n' "$host" | grep -Eq '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$' || {
+        echo '{"ok":false,"error":"invalid URL host"}'
+        return
+    }
+    case "$url_path" in
+        /*) : ;;
+        *) echo '{"ok":false,"error":"invalid URL path"}'; return ;;
+    esac
+    printf '%s\n' "$url_path" | grep -Eq '^[^|"\\[:space:][:cntrl:]]+$' || {
+        echo '{"ok":false,"error":"URL path contains unsupported characters"}'
+        return
+    }
+    case "$method" in
+        GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|'*') : ;;
+        *) echo '{"ok":false,"error":"unsupported HTTP method"}'; return ;;
+    esac
+    [ "$enabled" = "0" ] || enabled="1"
+    [ -n "$sec" ] || sec="url_$(printf '%s' "$protocol://$host$url_path|$method" | sha256sum | cut -c1-12)"
+
+    rpc_config_lock || return
+    uci set "vpn-manager.$sec=blocked_url"
+    uci set "vpn-manager.$sec.protocol=$protocol"
+    uci set "vpn-manager.$sec.host=$host"
+    uci set "vpn-manager.$sec.method=$method"
+    uci set "vpn-manager.$sec.path=$url_path"
+    uci set "vpn-manager.$sec.enabled=$enabled"
+    uci commit vpn-manager
+    rpc_config_unlock
+    printf '{"ok":true,"id":"%s"}' "$(json_escape "$sec")"
+}
+
+delete_blocked_url() {
+    sec="$2"
+    vm_blocked_url_exists "$sec" || {
+        echo '{"ok":false,"error":"blocked URL not found"}'
+        return
+    }
+    rpc_config_lock || return
+    uci -q delete "vpn-manager.$sec"
+    uci commit vpn-manager
+    rpc_config_unlock
+    echo '{"ok":true}'
 }
 
 vm_block_slug() {
@@ -1024,17 +1785,16 @@ save_blocked_domain() {
 
     [ -n "$sec" ] || sec="blk_$(vm_block_slug "$domain")"
 
+    rpc_config_lock || return
     uci set "vpn-manager.$sec=blocked_domain"
     uci set "vpn-manager.$sec.domain=$domain"
     uci set "vpn-manager.$sec.mode=$mode"
     uci set "vpn-manager.$sec.enabled=$enabled"
     uci commit vpn-manager
+    rpc_config_unlock
 
-    if /usr/libexec/vpn-manager/reconcile.sh >/dev/null 2>&1; then
-        printf '{"ok":true,"id":"%s"}' "$(json_escape "$sec")"
-    else
-        echo '{"ok":false,"error":"apply failed"}'
-    fi
+    vm_block_request domain-save
+    printf '{"ok":true,"id":"%s","queued":true,"job":"block"}' "$(json_escape "$sec")"
 }
 
 delete_blocked_domain() {
@@ -1047,33 +1807,29 @@ delete_blocked_domain() {
         echo '{"ok":false,"error":"blocked domain not found"}'
         return
     }
+    rpc_config_lock || return
     uci -q delete "vpn-manager.$sec"
     uci commit vpn-manager
-    /usr/libexec/vpn-manager/reconcile.sh >/dev/null 2>&1 || true
-    echo '{"ok":true}'
+    rpc_config_unlock
+    rm -f "$VM_STATE_DIR/block-cache/$sec.meta" "$VM_STATE_DIR/block-cache/$sec.v4" "$VM_STATE_DIR/block-cache/$sec.v6" 2>/dev/null || true
+    vm_block_request domain-delete
+    echo '{"ok":true,"queued":true,"job":"block"}'
 }
 status() {
-    up=0
-    down=0
-    for sec in $(vm_profile_list); do
-        iface="$(uci -q get vpn-manager.$sec.iface)"
-        hs_age="$(vm_handshake_age "$iface")"
-        s="$(vm_profile_status_from_age "$iface" "$hs_age" "180")"
-        if [ "$s" = "healthy" ]; then
-            up=$((up + 1))
-        else
-            down=$((down + 1))
-        fi
-    done
-    printf '{"up":%s,"down":%s,"timestamp":"%s"}' "$up" "$down" "$(vm_now)"
+    if rpc_snapshot_json status; then
+        printf ',"timestamp":"%s"}' "$(vm_now)"
+    else
+        echo '{"ok":false,"error":"unable to read configuration"}'
+    fi
 }
 
 apply_changes() {
-    /usr/libexec/vpn-manager/reconcile.sh >/dev/null 2>&1 || {
-        echo '{"ok":false,"error":"apply failed"}'
-        return
-    }
-    echo '{"ok":true}'
+    vm_apply_request full manual-apply
+    echo '{"ok":true,"queued":true,"job":"full"}'
+}
+
+apply_status() {
+    vm_apply_status_json
 }
 
 rollback_changes() {
@@ -1096,36 +1852,38 @@ toggle_profile() {
         return
     }
     [ "$enabled" = "0" ] || enabled="1"
+    rpc_config_lock || return
     vm_profile_set "$sec" "enabled" "$enabled"
     uci commit vpn-manager
-    echo '{"ok":true}'
+    rpc_config_unlock
+    vm_apply_request full profile-toggle
+    vm_block_request profile-toggle
+    echo '{"ok":true,"queued":true,"job":"full"}'
 }
 
 normalize_mac() {
-    echo "$1" | tr '[:upper:]' '[:lower:]'
+    echo "$1" | tr 'A-Z' 'a-z'
+}
+
+rpc_valid_mac() {
+    printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$'
+}
+
+rpc_valid_ipv4() {
+    printf '%s\n' "$1" | awk -F. '
+        NF != 4 { exit 1 }
+        {
+            for (i=1; i<=4; i++)
+                if ($i !~ /^[0-9]+$/ || $i + 0 > 255) exit 1
+        }
+    '
 }
 
 dedupe_device_policies() {
     keep_section="$1"
     keep_mac="$(normalize_mac "$2")"
     keep_ip="$3"
-
-    for sec in $(uci -q show vpn-manager | sed -n 's/^vpn-manager\.\([^.=]*\)=device_policy$/\1/p'); do
-        [ "$sec" = "$keep_section" ] && continue
-
-        sec_mac="$(normalize_mac "$(uci -q get vpn-manager.$sec.mac)")"
-        sec_ip="$(uci -q get vpn-manager.$sec.ip)"
-
-        if [ -n "$keep_mac" ] && [ "$sec_mac" = "$keep_mac" ]; then
-            uci -q delete "vpn-manager.$sec"
-            continue
-        fi
-
-        if [ -n "$keep_ip" ] && [ "$sec_ip" = "$keep_ip" ]; then
-            uci -q delete "vpn-manager.$sec"
-            continue
-        fi
-    done
+    rpc_apply_reference_batch dedupe-policy "$keep_section" "$keep_mac" "$keep_ip"
 }
 
 set_policy() {
@@ -1138,6 +1896,14 @@ set_policy() {
         echo '{"ok":false,"error":"missing args"}'
         return
     }
+    rpc_valid_mac "$mac" || {
+        echo '{"ok":false,"error":"invalid MAC address"}'
+        return
+    }
+    if [ -n "$ip" ] && ! rpc_valid_ipv4 "$ip"; then
+        echo '{"ok":false,"error":"invalid IPv4 address"}'
+        return
+    fi
 
     if [ "$target" != "wan" ] && ! vm_profile_exists "$target"; then
         mapped_target="$(vm_profile_by_iface "$target" 2>/dev/null || true)"
@@ -1149,18 +1915,18 @@ set_policy() {
         fi
     fi
 
-    vm_policy_set_device_target "$section" "$mac" "$ip" "$hostname" "$target"
-    dedupe_device_policies "$section" "$mac" "$ip"
-    uci commit vpn-manager
-
-    if /usr/libexec/vpn-manager/reconcile.sh >/dev/null 2>&1; then
-        :
-    else
-        echo '{"ok":false,"error":"apply failed"}'
+    rpc_config_lock || return
+    if ! dedupe_device_policies "$section" "$mac" "$ip"; then
+        rpc_config_unlock
+        echo '{"ok":false,"error":"unable to deduplicate policies"}'
         return
     fi
+    vm_policy_set_device_target "$section" "$mac" "$ip" "$hostname" "$target"
+    uci commit vpn-manager
+    rpc_config_unlock
 
-    echo '{"ok":true}'
+    vm_apply_request pbr policy-save
+    echo '{"ok":true,"queued":true,"job":"pbr"}'
 }
 
 set_profile() {
@@ -1183,12 +1949,18 @@ set_profile() {
         return
     }
 
+    rpc_config_lock || return
     if vm_profile_exists "$sec"; then
         :
     else
         vm_profile_add "$sec"
         vm_profile_set "$sec" "iface" "$(vm_iface_name_for_section "$sec")"
-        table_id="$(vm_profile_next_table_id)"
+        table_id="$(vm_profile_next_table_id 2>/dev/null || true)"
+        [ -n "$table_id" ] || {
+            rpc_config_unlock
+            echo '{"ok":false,"error":"no free routing table id"}'
+            return
+        }
         vm_profile_set "$sec" "table_id" "$table_id"
         vm_profile_set "$sec" "fwmark" "$(vm_profile_fwmark_for_table "$table_id")"
         vm_profile_set "$sec" "kill_switch" "0"
@@ -1217,10 +1989,11 @@ set_profile() {
 
     [ "$enabled" = "0" ] && vm_profile_set "$sec" "enabled" "0" || vm_profile_set "$sec" "enabled" "1"
 
-    vm_wireguard_sync_profile "$sec"
     uci commit vpn-manager
-    uci commit network
-    echo '{"ok":true}'
+    rpc_config_unlock
+    vm_apply_request full profile-save
+    vm_block_request profile-save
+    echo '{"ok":true,"queued":true,"job":"full"}'
 }
 
 delete_profile() {
@@ -1235,14 +2008,23 @@ delete_profile() {
         return
     }
 
-    iface="$(uci -q get vpn-manager.$sec.iface)"
+    rpc_config_lock || return
+    if ! rpc_apply_reference_batch delete-profile "$sec"; then
+        rpc_config_unlock
+        echo '{"ok":false,"error":"unable to update profile references"}'
+        return
+    fi
     vm_profile_delete "$sec"
-    [ -n "$iface" ] && uci -q delete "network.$iface"
-    [ -n "$iface" ] && uci -q delete "network.${iface}_peer"
 
     uci commit vpn-manager
-    uci commit network
-    echo '{"ok":true}'
+    if [ "$RPC_REFERENCE_WIRELESS_CHANGED" = "1" ]; then
+        uci commit wireless 2>/dev/null || true
+    fi
+    rpc_config_unlock
+
+    vm_apply_request full profile-delete
+    vm_block_request profile-delete
+    echo '{"ok":true,"queued":true,"job":"full"}'
 }
 
 delete_policy() {
@@ -1257,9 +2039,12 @@ delete_policy() {
         return
     }
 
+    rpc_config_lock || return
     uci -q delete "vpn-manager.$section"
     uci commit vpn-manager
-    echo '{"ok":true}'
+    rpc_config_unlock
+    vm_apply_request pbr policy-delete
+    echo '{"ok":true,"queued":true,"job":"pbr"}'
 }
 
 test_profile() {
@@ -1286,6 +2071,14 @@ import_profile() {
         echo '{"ok":false,"error":"conf file not found"}'
         return
     }
+    normalized_conf="$VM_STATE_DIR/import-normalized-$$.conf"
+    vm_init_dirs
+    tr -d '\r' < "$conf_file" > "$normalized_conf"
+    conf_file="$normalized_conf"
+    if ! rpc_config_lock; then
+        rm -f "$normalized_conf"
+        return
+    fi
     vm_profile_add "$sec"
 
     pk="$(sed -n 's/^PrivateKey[[:space:]]*=[[:space:]]*//p' "$conf_file" | head -n1)"
@@ -1301,11 +2094,15 @@ import_profile() {
     host="${endpoint%:*}"
     port="${endpoint##*:}"
 
-    old_iface="$(uci -q get vpn-manager.$sec.iface)"
     new_iface="$(vm_iface_name_for_section "$sec")"
-    table_id="$(vm_profile_next_table_id)"
+    table_id="$(vm_profile_next_table_id 2>/dev/null || true)"
+    [ -n "$table_id" ] || {
+        rpc_config_unlock
+        rm -f "$normalized_conf"
+        echo '{"ok":false,"error":"no free routing table id"}'
+        return
+    }
     fwmark="$(vm_profile_fwmark_for_table "$table_id")"
-    [ -n "$old_iface" ] && [ "$old_iface" != "$new_iface" ] && uci -q delete "network.$old_iface"
 
     vm_profile_set "$sec" name "$sec"
     vm_profile_set "$sec" iface "$new_iface"
@@ -1329,10 +2126,12 @@ import_profile() {
     done
     unset IFS
 
-    vm_wireguard_sync_profile "$sec"
     uci commit vpn-manager
-    uci commit network
-    echo '{"ok":true}'
+    rpc_config_unlock
+    rm -f "$normalized_conf"
+    vm_apply_request full profile-import
+    vm_block_request profile-import
+    echo '{"ok":true,"queued":true,"job":"full"}'
 }
 
 create_multiebay_profile() {
@@ -1346,10 +2145,9 @@ create_multiebay_profile() {
     profile_name="$8"
     allow_http_proxy="$9"
 
-    vm_global_ensure
-    [ -n "$api_base" ] || api_base="$(vm_global_get multiebay_api_base)"
-    [ -n "$api_key" ] || api_key="$(vm_global_get multiebay_api_key)"
-    [ -n "$allow_http_proxy" ] || allow_http_proxy="$(vm_global_get multiebay_allow_http_proxy)"
+    [ -n "$api_base" ] || api_base="$(vm_global_get multiebay_api_base 2>/dev/null || true)"
+    [ -n "$api_key" ] || api_key="$(vm_global_get multiebay_api_key 2>/dev/null || true)"
+    [ -n "$allow_http_proxy" ] || allow_http_proxy="$(vm_global_get multiebay_allow_http_proxy 2>/dev/null || true)"
 
     [ -n "$api_key" ] || {
         echo '{"ok":false,"error":"missing api key"}'
@@ -1478,11 +2276,15 @@ create_multiebay_profile() {
     fi
 
     rm -f "$tmp_conf"
+    rpc_config_lock || {
+        echo '{"ok":false,"error":"profile imported but name update is busy"}'
+        return
+    }
     vm_profile_set "$sec" "name" "$profile_name"
     uci commit vpn-manager
-    uci commit network
+    rpc_config_unlock
 
-    printf '{"ok":true,"id":"%s","gateway_name":"%s","wg_name":"%s"}' \
+    printf '{"ok":true,"id":"%s","gateway_name":"%s","wg_name":"%s","queued":true,"job":"full"}' \
         "$(json_escape "$sec")" \
         "$(json_escape "$gateway_name")" \
         "$(json_escape "$wg_name")"
@@ -1509,7 +2311,16 @@ case "$1" in
     list_blocked_domains) list_blocked_domains ;;
     save_blocked_domain) save_blocked_domain "$@" ;;
     delete_blocked_domain) delete_blocked_domain "$@" ;;
+    http_debug_status) http_debug_status ;;
+    http_debug_log) http_debug_log ;;
+    save_http_debug_settings) save_http_debug_settings "$@" ;;
+    save_http_debug_client) save_http_debug_client "$@" ;;
+    delete_http_debug_client) delete_http_debug_client "$@" ;;
+    save_blocked_url) save_blocked_url "$@" ;;
+    delete_blocked_url) delete_blocked_url "$@" ;;
     route_status) route_status ;;
+    refresh_route_status) refresh_route_status ;;
+    apply_status) apply_status ;;
     list_multiebay_settings) list_multiebay_settings ;;
     save_multiebay_settings) save_multiebay_settings "$@" ;;
     clear_multiebay_api_key) clear_multiebay_api_key ;;

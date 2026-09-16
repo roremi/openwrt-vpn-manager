@@ -111,6 +111,10 @@
                 <i class="fas fa-ban w-5 text-center text-lg"></i>
                 <span>Chặn Domain</span>
             </a>
+            <a href="#" onclick="switchTab('http-debug', this)" class="menu-tab flex items-center space-x-3 px-3 py-2.5 text-gray-300 hover:bg-white/5 rounded-lg font-medium text-sm transition-colors">
+                <i class="fas fa-search w-5 text-center text-lg"></i>
+                <span>HTTP Debug</span>
+            </a>
             <a href="#" onclick="switchTab('policies', this)" class="menu-tab flex items-center space-x-3 px-3 py-2.5 text-gray-300 hover:bg-white/5 rounded-lg font-medium text-sm transition-colors">
                 <i class="fas fa-route w-5 text-center text-lg"></i>
                 <span>Policies & Advanced</span>
@@ -124,6 +128,10 @@
                     <i class="fas fa-sync-alt w-5 text-center"></i>
                     <span class="text-sm">Refresh All</span>
                 </button>
+                <button id="apply-now-button" onclick="applyNow()" class="w-full flex items-center space-x-3 px-3 py-2 text-gray-400 hover:text-gray-200 transition-colors">
+                    <i class="fas fa-play-circle w-5 text-center"></i>
+                    <span class="text-sm">Apply Now</span>
+                </button>
                 <a href="/cgi-bin/luci/admin/services/vpnmanager/api_docs" target="_blank" class="w-full flex items-center space-x-3 px-3 py-2 text-gray-400 hover:text-gray-200 transition-colors">
                     <i class="fas fa-book-open w-5 text-center"></i>
                     <span class="text-sm">API Docs</span>
@@ -131,6 +139,10 @@
                 <div class="flex items-center space-x-3 px-3 py-2 mt-2 text-gray-400">
                     <i class="fas fa-clock w-5 text-center"></i>
                     <span class="text-xs" id="last-sync">Ready</span>
+                </div>
+                <div class="flex items-start space-x-3 px-3 py-2 text-gray-400">
+                    <i class="fas fa-tasks w-5 text-center mt-0.5"></i>
+                    <span class="text-xs leading-4" id="apply-state">Apply: checking...</span>
                 </div>
             </div>
         </div>
@@ -184,6 +196,9 @@
                         <p class="text-sm text-gray-500 mt-1">Assign WAN or specific VPN profiles to devices instantly.</p>
                     </div>
                     <div class="flex space-x-3">
+                        <span class="inline-flex items-center text-xs font-medium text-green-600" title="Connected devices refresh automatically every 5 seconds">
+                            <span class="w-2 h-2 mr-1.5 rounded-full bg-green-500"></span>Live 5s
+                        </span>
                         <input id="device-search" type="text" placeholder="Search MAC/IP/Host..." class="form-control w-48" oninput="renderDevices()">
                         <select id="device-filter" class="form-control w-32" onchange="renderDevices()">
                             <option value="all">All</option>
@@ -394,6 +409,7 @@
 
                 <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mt-6">
                     <h3 class="text-lg font-bold text-gray-700 mb-2">Dedicated WiFi Over VPN</h3>
+                    <p class="text-xs text-amber-700 mb-2">WiFi restarts briefly when saved. Wait for Apply Status to finish before creating another SSID; unsafe changes roll back automatically.</p>
                     <p class="text-sm text-gray-500 mb-4">Tạo một SSID riêng có subnet riêng, rồi ép toàn bộ thiết bị trong SSID đó đi qua đúng một VPN profile. Các rule theo thiết bị hiện có vẫn giữ nguyên và không bị sửa.</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                         <div><label class="block text-xs font-semibold text-gray-500 mb-1">Binding ID</label><input id="wifi-binding-id" type="text" placeholder="wifi_shop_us" class="form-control"></div>
@@ -404,7 +420,7 @@
                         <div><label class="block text-xs font-semibold text-gray-500 mb-1">Enabled</label><select id="wifi-binding-enabled" class="form-control"><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
                     </div>
                     <div class="flex space-x-3 mb-5">
-                        <button class="btn-primary" onclick="saveWifiBinding()">Save Dedicated WiFi</button>
+                        <button id="wifi-binding-save-button" class="btn-primary" onclick="saveWifiBinding()">Save Dedicated WiFi</button>
                         <button class="btn-secondary" onclick="clearWifiBindingForm()">Clear</button>
                     </div>
                     <div class="overflow-x-auto">
@@ -478,6 +494,110 @@
                         </table>
                     </div>
                 </div>
+            </div>
+            <!-- HTTP Debug Tab -->
+            <div id="tab-http-debug" class="tab-content hidden">
+                <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-700">HTTP Debug &amp; URL Blocking</h2>
+                        <p class="text-sm text-gray-500 mt-1">Transparent HTTP capture and targeted HTTPS inspection without configuring a device proxy.</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <a id="http-debug-ca-link" class="btn-secondary opacity-50 pointer-events-none" href="#">
+                            <i class="fas fa-certificate mr-1"></i>CA Certificate
+                        </a>
+                        <button class="btn-primary" onclick="loadHttpDebugLog()">
+                            <i class="fas fa-sync-alt mr-1"></i>Refresh Log
+                        </button>
+                    </div>
+                </div>
+
+                <div class="border border-amber-300 bg-amber-50 px-5 py-4 mb-6 text-sm text-amber-900">
+                    Không cần cấu hình proxy trên thiết bị. Chỉ host có HTTPS rule đang bật mới được giải mã; TLS của Google và các dịch vụ khác được chuyển tiếp nguyên trạng. App certificate-pinning có thể từ chối rule nhắm vào host của app đó.
+                    Router tự chặn QUIC và giữ đường ra qua đúng VPN đang gán cho thiết bị hoặc SSID. Log chứa URL, method, status và toàn bộ HTTP headers; request/response body không được lưu.
+                </div>
+
+                <section class="bg-white border border-gray-200 p-6 mb-6">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-700">Proxy Runtime</h3>
+                            <p id="http-debug-runtime" class="text-sm text-gray-500 mt-1">Checking runtime...</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <select id="http-debug-enabled" class="form-control w-32">
+                                <option value="0">Tắt</option>
+                                <option value="1">Bật</option>
+                            </select>
+                            <button class="btn-primary" onclick="saveHttpDebugSettings()">Lưu trạng thái</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="bg-white border border-gray-200 mb-6">
+                    <div class="px-6 py-5 border-b border-gray-100">
+                        <h3 class="text-lg font-bold text-gray-700">Thiết bị được bắt log</h3>
+                        <p class="text-sm text-gray-500 mt-1">Chỉ thiết bị được chọn mới bị chuyển hướng HTTP/HTTPS trong suốt; thiết bị khác không bị ảnh hưởng.</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
+                                <tr>
+                                    <th class="px-6 py-4">Thiết bị</th>
+                                    <th class="px-6 py-4">IP</th>
+                                    <th class="px-6 py-4">MAC</th>
+                                    <th class="px-6 py-4">Quyền</th>
+                                    <th class="px-6 py-4 text-right">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="http-debug-clients-body" class="divide-y divide-gray-100"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="bg-white border border-gray-200 p-6 mb-6">
+                    <h3 class="text-lg font-bold text-gray-700 mb-4">Chặn URL / Path chính xác</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
+                        <div class="md:col-span-3">
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">URL</label>
+                            <input id="blocked-url-value" type="text" placeholder="https://example.com/api/login" class="form-control">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Method</label>
+                            <select id="blocked-url-method" class="form-control">
+                                <option value="*">Tất cả</option>
+                                <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Trạng thái</label>
+                            <select id="blocked-url-enabled" class="form-control"><option value="1">Bật</option><option value="0">Tắt</option></select>
+                        </div>
+                        <button class="btn-primary" onclick="saveBlockedUrl()">Lưu rule</button>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-3">Dùng <span class="font-mono">*</span> ở cuối path để khớp nhánh, ví dụ <span class="font-mono">/api/private/*</span>. Rule HTTPS có hiệu lực sau khi thiết bị cài và tin cậy CA.</p>
+                </section>
+
+                <section class="bg-white border border-gray-200 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
+                                <tr><th class="px-6 py-4">Method</th><th class="px-6 py-4">URL / Path</th><th class="px-6 py-4">Trạng thái</th><th class="px-6 py-4 text-right">Thao tác</th></tr>
+                            </thead>
+                            <tbody id="blocked-url-body" class="divide-y divide-gray-100"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="bg-white border border-gray-200 p-6 mt-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-700">HTTP Access &amp; Header Log</h3>
+                            <p class="text-xs text-gray-500 mt-1">200 dòng gần nhất; headers được percent-encode an toàn bởi Squid.</p>
+                        </div>
+                        <button class="btn-secondary" onclick="loadHttpDebugLog()"><i class="fas fa-sync-alt mr-1"></i>Refresh</button>
+                    </div>
+                    <textarea id="http-debug-log" readonly class="w-full h-72 form-control bg-gray-50 font-mono text-xs" style="resize: vertical;"></textarea>
+                </section>
             </div>
             <!-- Policies Tab -->
             <div id="tab-policies" class="tab-content hidden">
@@ -569,16 +689,25 @@
         let profileTargets = [{ value: 'wan', label: 'WAN' }];
         let policyMap = {};
         let profileMap = {};
+        let cachedProfiles = [];
         let cachedDevices = [];
+        let cachedDevicesSignature = '';
         let cachedPolicies = [];
         let wifiBindingTargets = [];
         let cachedWifiBindings = [];
         let cachedRouteStatus = { wan: null, profiles: [] };
+        let routeStatusMap = new Map();
         let multiebaySettings = { api_base: 'https://multiebay.com', api_key_saved: false, api_key: '', allow_http_proxy: '1' };
         let softwareApiSettings = { api_key_saved: false, api_key: '' };
+        let httpDebugState = { enabled: '0', binary_ready: false, running: false, ca_ready: false, clients: [], rules: [] };
+        let cachedApplyStatus = null;
+        const inFlightRequests = new Map();
+        const GET_TIMEOUT_MS = 12000;
+        const POST_TIMEOUT_MS = 90000;
 
         // Tab Switching Logic
         function switchTab(tabId, el) {
+            activeTab = tabId;
             document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
             document.getElementById('tab-' + tabId).classList.remove('hidden');
             
@@ -590,6 +719,15 @@
             if(el) {
                 el.classList.remove('text-gray-300', 'hover:bg-white/5', 'font-medium');
                 el.classList.add('bg-[#f4c130]', 'text-gray-900', 'shadow-sm', 'font-semibold');
+            }
+
+            if (tabId === 'devices' && !document.hidden) {
+                scheduleDevicePoll(0);
+            } else if (tabId === 'http-debug' && !document.hidden) {
+                loadHttpDebugLog();
+            } else {
+                window.clearTimeout(devicePollTimer);
+                devicePollTimer = null;
             }
         }
 
@@ -607,15 +745,80 @@
             showToast._timer = window.setTimeout(() => { t.className = 'toast-msg'; }, 2500);
         }
 
-        function apiGet(path) { return fetch(basePath + path, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json()); }
-        
-        function apiPost(path, data) {
+        function requestJson(path, options, timeoutMs, requestKey) {
+            if (requestKey && inFlightRequests.has(requestKey)) {
+                return inFlightRequests.get(requestKey);
+            }
+
+            const controller = window.AbortController ? new window.AbortController() : null;
+            const requestOptions = Object.assign({}, options || {});
+            if (controller) requestOptions.signal = controller.signal;
+
+            const timer = window.setTimeout(() => {
+                if (controller) controller.abort();
+            }, timeoutMs || GET_TIMEOUT_MS);
+
+            let request;
+            request = fetch(basePath + path, requestOptions)
+                .then(response => response.text().then(text => {
+                    let payload = {};
+                    if (text) {
+                        try {
+                            payload = JSON.parse(text);
+                        } catch (_) {
+                            throw new Error('Router returned invalid JSON');
+                        }
+                    }
+                    if (!response.ok) {
+                        throw new Error(payload.error || ('HTTP ' + response.status));
+                    }
+                    return payload;
+                }))
+                .catch(error => {
+                    if (error && error.name === 'AbortError') {
+                        throw new Error('Router request timed out');
+                    }
+                    throw error;
+                })
+                .finally(() => {
+                    window.clearTimeout(timer);
+                    if (requestKey && inFlightRequests.get(requestKey) === request) {
+                        inFlightRequests.delete(requestKey);
+                    }
+                });
+
+            if (requestKey) inFlightRequests.set(requestKey, request);
+            return request;
+        }
+
+        function apiGet(path, timeoutMs) {
+            return requestJson(path, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }, timeoutMs || GET_TIMEOUT_MS, 'GET:' + path);
+        }
+
+        function apiPost(path, data, timeoutMs) {
             const body = new URLSearchParams(data || {}).toString();
-            return fetch(basePath + path, {
+            const requestKey = 'POST:' + path + ':' + body;
+            if (inFlightRequests.has(requestKey)) return inFlightRequests.get(requestKey);
+
+            const send = attempt => requestJson(path, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' },
                 body: body
-            }).then(r => r.json());
+            }, timeoutMs || POST_TIMEOUT_MS).then(payload => {
+                const busy = payload && payload.ok === false && /configuration is busy/i.test(payload.error || '');
+                if (!busy || attempt >= 15) return payload;
+                const retryMs = Math.min(100 * Math.pow(2, attempt), 1000);
+                return new Promise(resolve => window.setTimeout(resolve, retryMs)).then(() => send(attempt + 1));
+            });
+
+            let request;
+            request = send(0).finally(() => {
+                if (inFlightRequests.get(requestKey) === request) inFlightRequests.delete(requestKey);
+            });
+            inFlightRequests.set(requestKey, request);
+            return request;
         }
 
         function statusBadge(target) {
@@ -631,7 +834,7 @@
 
         function routeStatusForTarget(target) {
             if (!target || target === 'wan') return cachedRouteStatus.wan || null;
-            return (cachedRouteStatus.profiles || []).find(p => p.id === target) || null;
+            return routeStatusMap.get(target) || null;
         }
 
         function renderExitIpCell(routeObj) {
@@ -650,9 +853,8 @@
             return apiGet('/route_status').then(res => {
                 if (res.ok === false) throw new Error(res.error || 'Unable to load route status');
                 cachedRouteStatus = res || { wan: null, profiles: [] };
-            }).catch(() => {
-                cachedRouteStatus = { wan: null, profiles: [] };
-            });
+                routeStatusMap = new Map((cachedRouteStatus.profiles || []).map(item => [item.id, item]));
+            }).catch(() => {});
         }
 
         function healthBadge(st) { return '<span class="badge ' + h(st || 'unknown') + '">' + h(st || 'unk') + '</span>'; }
@@ -681,9 +883,83 @@
             return hit ? (val === 'wan' ? 'WAN' : hit.label.split(' [')[0]) : val;
         }
 
-        function applyIfNeeded() {
-            return apiPost('/apply', {}).then(res => {
-                if (res.ok === false) throw new Error(res.error || 'Apply failed');
+        function applyPartLabel(label, part) {
+            const item = part || {};
+            return label + ': ' + (item.state || 'idle');
+        }
+
+        function renderApplyStatus(status) {
+            cachedApplyStatus = status || {};
+            const core = cachedApplyStatus.core || {};
+            const block = cachedApplyStatus.block || {};
+            const stateEl = document.getElementById('apply-state');
+            const applyButton = document.getElementById('apply-now-button');
+            const wifiBindingButton = document.getElementById('wifi-binding-save-button');
+            const hasError = core.state === 'error' || block.state === 'error';
+            const isPending = !!cachedApplyStatus.pending || ['queued', 'running'].includes(core.state) || ['queued', 'running'].includes(block.state);
+
+            if (stateEl) {
+                stateEl.textContent = applyPartLabel('Core', core) + ' / ' + applyPartLabel('Block', block);
+                stateEl.className = 'text-xs leading-4 ' + (hasError ? 'text-red-400' : (isPending ? 'text-yellow-300' : 'text-gray-400'));
+                stateEl.title = [core.detail, block.detail].filter(Boolean).join(' | ');
+            }
+
+            if (applyButton) {
+                applyButton.disabled = isPending;
+                applyButton.classList.toggle('opacity-50', isPending);
+                applyButton.classList.toggle('cursor-not-allowed', isPending);
+            }
+            if (wifiBindingButton) {
+                wifiBindingButton.disabled = isPending;
+                wifiBindingButton.classList.toggle('opacity-50', isPending);
+                wifiBindingButton.classList.toggle('cursor-not-allowed', isPending);
+            }
+        }
+
+        function loadApplyStatus() {
+            return apiGet('/apply_status').then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to load apply status');
+                renderApplyStatus(res);
+                return res;
+            });
+        }
+
+        function applyingInBackground(res, message) {
+            if (res && res.ok === false) throw new Error(res.error || 'Unable to save');
+            const job = (res && res.job) || 'full';
+            const status = Object.assign({ ok: true }, cachedApplyStatus || {});
+            status.core = Object.assign({ job: 'full', state: 'idle', updated_at: 0, detail: '' }, status.core || {});
+            status.block = Object.assign({ job: 'block', state: 'idle', updated_at: 0, detail: '' }, status.block || {});
+            status.pending = true;
+
+            if (job === 'block') {
+                status.block = Object.assign({}, status.block, { job: job, state: 'queued', detail: message });
+            } else {
+                status.core = Object.assign({}, status.core, { job: job, state: 'queued', detail: message });
+            }
+
+            renderApplyStatus(status);
+            showToast(message + '; applying in background', true);
+            scheduleStatusPoll(750);
+            return res;
+        }
+
+        function refreshAfterMutation(request) {
+            return Promise.resolve(request).catch(error => {
+                showToast('Change queued, but refresh failed: ' + error.message, false);
+            });
+        }
+
+        function applyNow() {
+            const button = document.getElementById('apply-now-button');
+            if (button) button.disabled = true;
+
+            return apiPost('/apply', {}, 30000).then(res => {
+                applyingInBackground(res, 'Apply requested');
+                return res;
+            }).catch(error => {
+                if (button) button.disabled = false;
+                showToast(error.message, false);
             });
         }
 
@@ -721,8 +997,8 @@
                 enabled: document.getElementById('wifi-enabled').value
             }).then(res => {
                 if (res.ok === false) throw new Error(res.error || 'Unable to save WiFi');
-                showToast('WiFi config applied. Radio resetting...', true);
-                setTimeout(() => loadWifiSettings(true), 4000);
+                applyingInBackground(res, 'WiFi settings saved');
+                return refreshAfterMutation(loadWifiSettings(true));
             }).catch(e => showToast(e.message, false));
         }
 
@@ -803,8 +1079,9 @@
             }).then(res => {
                 if (res.ok === false) throw new Error(res.error || 'Unable to save dedicated WiFi');
                 clearWifiBindingForm();
-                return applyIfNeeded();
-            }).then(() => refreshAll()).then(() => showToast('Dedicated WiFi saved', true))
+                applyingInBackground(res, 'Dedicated WiFi saved');
+                return refreshAfterMutation(loadWifiBindings());
+            })
             .catch(e => showToast(e.message, false));
         }
 
@@ -812,8 +1089,9 @@
             if (!confirm('Delete dedicated WiFi binding: ' + id + '?')) return;
             apiPost('/wifi_binding_delete', { id: id }).then(res => {
                 if (res.ok === false) throw new Error(res.error || 'Unable to delete dedicated WiFi');
-                return applyIfNeeded();
-            }).then(() => refreshAll()).then(() => showToast('Dedicated WiFi deleted', true))
+                applyingInBackground(res, 'Dedicated WiFi deleted');
+                return refreshAfterMutation(loadWifiBindings());
+            })
             .catch(e => showToast(e.message, false));
         }
 
@@ -947,10 +1225,11 @@
                 allow_http_proxy: document.getElementById('multiebay-allow-http').value
             }).then(res => {
                 if (res.ok === false) throw new Error(res.error);
-                status.textContent = 'VPN Integrated successfully: ' + safeId;
+                status.textContent = 'VPN integrated; applying in background: ' + safeId;
                 document.getElementById('multiebay-proxy-quick').value = '';
-                return applyIfNeeded();
-            }).then(() => refreshAll()).then(() => showToast('Proxy integrated', true))
+                applyingInBackground(res, 'Proxy integrated');
+                return refreshAfterMutation(Promise.all([loadProfiles(), loadStatus()]));
+            })
             .catch(e => {
                 status.textContent = 'Integration failed: ' + e.message;
                 showToast(e.message, false);
@@ -1004,9 +1283,8 @@
                     statusEl.textContent = 'Imported profile: ' + importId;
                     idInput.value = importId;
                     fileInput.value = '';
-                    return applyIfNeeded();
-                }).then(() => refreshAll()).then(() => {
-                    showToast('Config imported successfully', true);
+                    applyingInBackground(res, 'Config imported successfully');
+                    return refreshAfterMutation(Promise.all([loadProfiles(), loadStatus()]));
                 }).catch(e => {
                     statusEl.textContent = 'Import failed: ' + e.message;
                     showToast(e.message, false);
@@ -1019,40 +1297,47 @@
         // Profiles
         function loadProfiles() {
             return apiGet('/profiles').then(d => {
-                const profiles = d.profiles || [];
+                cachedProfiles = d.profiles || [];
                 profileMap = {};
-                document.getElementById('profile-count-dash').textContent = profiles.length;
-                profileTargets = [{ value: 'wan', label: 'Direct WAN' }].concat(profiles.map(p => ({
+                cachedProfiles.forEach(p => { profileMap[p.id] = p; });
+                document.getElementById('profile-count-dash').textContent = cachedProfiles.length;
+                profileTargets = [{ value: 'wan', label: 'Direct WAN' }].concat(cachedProfiles.map(p => ({
                     value: p.id,
                     label: (p.name || p.id) + ' [' + p.id + ']'
                 })));
-                wifiBindingTargets = profiles.map(p => ({
+                wifiBindingTargets = cachedProfiles.map(p => ({
                     value: p.id,
                     label: (p.name || p.id) + ' [' + p.id + ']'
                 }));
                 renderTargetOptions();
+                renderProfiles();
+                renderPolicies();
+                renderDevices();
+                renderWifiBindings();
+            });
+        }
 
-                const tb = document.getElementById('profiles-table-body');
-                tb.innerHTML = '';
-                profiles.forEach(p => {
-                    profileMap[p.id] = p;
-                    const routeObj = routeStatusForTarget(p.id);
-                    const tr = document.createElement('tr');
-                    tr.className = 'hover:bg-gray-50';
-                    tr.innerHTML = `
-                        <td class="px-6 py-4 font-medium text-gray-800">${h(p.name || p.id)}</td>
-                        <td class="px-6 py-4 text-gray-500 font-mono text-xs">${h(p.id)}</td>
-                        <td class="px-6 py-4 text-gray-500">${h(p.endpoint)}</td>
-                        <td class="px-6 py-4">${healthBadge(p.status)}</td>
-                        <td class="px-6 py-4">${renderExitIpCell(routeObj)}</td>
-                        <td class="px-6 py-4 text-gray-500">${h(p.handshake_age)}s</td>
-                        <td class="px-6 py-4 text-right space-x-2">
-                            <button class="btn-secondary btn-tiny" onclick="editProfile('${h(p.id)}')">Edit</button>
-                            <button class="btn-danger btn-tiny" onclick="deleteProfile('${h(p.id)}')">Del</button>
-                        </td>
-                    `;
-                    tb.appendChild(tr);
-                });
+        function renderProfiles() {
+            const tb = document.getElementById('profiles-table-body');
+            if (!tb) return;
+            tb.innerHTML = '';
+            cachedProfiles.forEach(p => {
+                const routeObj = routeStatusForTarget(p.id);
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-50';
+                tr.innerHTML = `
+                    <td class="px-6 py-4 font-medium text-gray-800">${h(p.name || p.id)}</td>
+                    <td class="px-6 py-4 text-gray-500 font-mono text-xs">${h(p.id)}</td>
+                    <td class="px-6 py-4 text-gray-500">${h(p.endpoint)}</td>
+                    <td class="px-6 py-4">${healthBadge(p.status)}</td>
+                    <td class="px-6 py-4">${renderExitIpCell(routeObj)}</td>
+                    <td class="px-6 py-4 text-gray-500">${h(p.handshake_age)}s</td>
+                    <td class="px-6 py-4 text-right space-x-2">
+                        <button class="btn-secondary btn-tiny" onclick="editProfile('${h(p.id)}')">Edit</button>
+                        <button class="btn-danger btn-tiny" onclick="deleteProfile('${h(p.id)}')">Del</button>
+                    </td>
+                `;
+                tb.appendChild(tr);
             });
         }
 
@@ -1100,8 +1385,9 @@
             }).then(res => {
                 if (res.ok === false) throw new Error(res.error);
                 clearProfileForm();
-                return applyIfNeeded();
-            }).then(() => refreshAll()).then(() => showToast('Profile saved', true))
+                applyingInBackground(res, 'Profile saved');
+                return refreshAfterMutation(Promise.all([loadProfiles(), loadStatus()]));
+            })
             .catch(e => showToast(e.message, false));
         }
 
@@ -1109,16 +1395,24 @@
             if (!confirm('Delete VPN profile: ' + id + '?')) return;
             apiPost('/profile_delete', { id: id }).then(res => {
                 if (res.ok === false) throw new Error(res.error);
-                return applyIfNeeded();
-            }).then(()=>refreshAll()).then(()=>showToast('Profile deleted', true))
+                applyingInBackground(res, 'Profile deleted');
+                return refreshAfterMutation(Promise.all([
+                    loadProfiles(), loadPolicies(), loadWifiBindings(), loadStatus()
+                ]).then(() => renderDevices()));
+            })
             .catch(e=>showToast(e.message, false));
         }
 
         // Devices
         function loadDevices() {
             return apiGet('/devices').then(d => {
-                cachedDevices = d.devices || [];
+                const devices = Array.isArray(d.devices) ? d.devices : [];
+                const signature = JSON.stringify(devices);
+                if (signature === cachedDevicesSignature) return false;
+                cachedDevicesSignature = signature;
+                cachedDevices = devices;
                 renderDevices();
+                return true;
             });
         }
 
@@ -1131,7 +1425,7 @@
             cachedDevices.forEach(d => {
                 let target = 'wan';
                 let polSec = '';
-                const p = cachedPolicies.find(x => x.mac.toLowerCase() === d.mac.toLowerCase() || (x.ip && x.ip === d.ip));
+                const p = policyMap['mac:' + d.mac.toLowerCase()] || policyMap['ip:' + d.ip];
                 if (p) { target = p.target || 'wan'; polSec = p.section; }
                 const routeObj = routeStatusForTarget(target);
 
@@ -1144,8 +1438,6 @@
                     if (!(d.hostname+'').toLowerCase().includes(term) && !d.ip.includes(term) && !d.mac.toLowerCase().includes(term)) return;
                 }
 
-                let optionsStr = profileTargets.map(pt => `<option value="${pt.value}" ${target===pt.value?'selected':''}>${pt.label}</option>`).join('');
-
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-gray-50';
                 tr.innerHTML = `
@@ -1156,13 +1448,29 @@
                     <td class="px-6 py-4">${statusBadge(target)}</td>
                     <td class="px-6 py-4">${renderExitIpCell(routeObj)}</td>
                     <td class="px-6 py-4 flex items-center space-x-2">
-                        <select class="form-control text-xs py-1" style="width:160px" onchange="setRoute('${h(polSec)}', '${h(d.mac)}', '${h(d.ip)}', '${h(d.hostname)}', this.value)">
-                            ${optionsStr}
+                        <select class="form-control text-xs py-1" style="width:160px" onfocus="populateDeviceTargetSelect(this)" onchange="setRoute('${h(polSec)}', '${h(d.mac)}', '${h(d.ip)}', '${h(d.hostname)}', this.value)">
+                            <option value="${h(target)}" selected>${h(targetLabel(target))}</option>
                         </select>
                     </td>
                 `;
                 tb.appendChild(tr);
             });
+            renderHttpDebugClients();
+        }
+
+        function populateDeviceTargetSelect(select) {
+            if (!select || select.dataset.loaded === '1') return;
+            const keep = select.value;
+            const fragment = document.createDocumentFragment();
+            profileTargets.forEach(target => {
+                const option = document.createElement('option');
+                option.value = target.value;
+                option.textContent = target.label;
+                fragment.appendChild(option);
+            });
+            select.replaceChildren(fragment);
+            if (profileTargets.some(target => target.value === keep)) select.value = keep;
+            select.dataset.loaded = '1';
         }
 
         function setRoute(section, mac, ip, hn, target) {
@@ -1173,8 +1481,9 @@
             apiPost('/policy', { section: secId, mac: mac, ip: ip, hostname: hn==='unknown'?'':hn, target: target })
             .then(res => {
                 if (res.ok === false) throw new Error(res.error);
-                return applyIfNeeded();
-            }).then(()=>refreshAll()).then(()=>showToast('Route updated instantly', true))
+                applyingInBackground(res, 'Route saved');
+                return refreshAfterMutation(loadPolicies().then(() => renderDevices()));
+            })
             .catch(e=>showToast(e.message,false));
         }
 
@@ -1182,23 +1491,33 @@
         function loadPolicies() {
             return apiGet('/policies').then(d => {
                 cachedPolicies = d.policies || [];
-                const tb = document.getElementById('policies-table-body');
-                tb.innerHTML = '';
-                cachedPolicies.forEach(p => {
-                    const tr = document.createElement('tr');
-                    tr.className = 'hover:bg-gray-50';
-                    tr.innerHTML = `
-                        <td class="px-6 py-4 font-mono text-xs text-blue-600">${h(p.section)}</td>
-                        <td class="px-6 py-4 text-gray-800">${h(p.hostname)}</td>
-                        <td class="px-6 py-4 font-mono text-xs text-gray-500">${h(p.mac)}</td>
-                        <td class="px-6 py-4 text-gray-600">${h(p.ip)}</td>
-                        <td class="px-6 py-4">${statusBadge(p.target||'wan')}</td>
-                        <td class="px-6 py-4 text-right space-x-2">
-                            <button class="btn-secondary btn-tiny" onclick="deletePolicy('${h(p.section)}')">Delete</button>
-                        </td>
-                    `;
-                    tb.appendChild(tr);
+                policyMap = {};
+                cachedPolicies.forEach(policy => {
+                    if (policy.mac) policyMap['mac:' + policy.mac.toLowerCase()] = policy;
+                    if (policy.ip) policyMap['ip:' + policy.ip] = policy;
                 });
+                renderPolicies();
+            });
+        }
+
+        function renderPolicies() {
+            const tb = document.getElementById('policies-table-body');
+            if (!tb) return;
+            tb.innerHTML = '';
+            cachedPolicies.forEach(p => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-50';
+                tr.innerHTML = `
+                    <td class="px-6 py-4 font-mono text-xs text-blue-600">${h(p.section)}</td>
+                    <td class="px-6 py-4 text-gray-800">${h(p.hostname)}</td>
+                    <td class="px-6 py-4 font-mono text-xs text-gray-500">${h(p.mac)}</td>
+                    <td class="px-6 py-4 text-gray-600">${h(p.ip)}</td>
+                    <td class="px-6 py-4">${statusBadge(p.target||'wan')}</td>
+                    <td class="px-6 py-4 text-right space-x-2">
+                        <button class="btn-secondary btn-tiny" onclick="deletePolicy('${h(p.section)}')">Delete</button>
+                    </td>
+                `;
+                tb.appendChild(tr);
             });
         }
 
@@ -1213,8 +1532,9 @@
             }).then(res => {
                 if(res.ok === false) throw new Error(res.error);
                 clearPolicyForm();
-                return applyIfNeeded();
-            }).then(()=>refreshAll()).then(()=>showToast('Policy created', true))
+                applyingInBackground(res, 'Policy saved');
+                return refreshAfterMutation(loadPolicies().then(() => renderDevices()));
+            })
             .catch(e=>showToast(e.message,false));
         }
 
@@ -1222,8 +1542,9 @@
             if(!confirm('Drop policy ' + sec + '?')) return;
             apiPost('/policy_delete', { section: sec }).then(res => {
                 if(res.ok===false) throw new Error(res.error);
-                return applyIfNeeded();
-            }).then(()=>refreshAll()).then(()=>showToast('Policy deleted', true))
+                applyingInBackground(res, 'Policy deleted');
+                return refreshAfterMutation(loadPolicies().then(() => renderDevices()));
+            })
             .catch(e=>showToast(e.message,false));
         }
 
@@ -1275,7 +1596,7 @@
             const domain = document.getElementById('block-domain').value.trim();
             if (!domain) { showToast('Nhập domain hoặc link', false); return; }
             const st = document.getElementById('block-status');
-            st.textContent = 'Đang phân giải & áp dụng...';
+            st.textContent = 'Đang lưu...';
             apiPost('/blocked_domain_save', {
                 id: editingBlockId,
                 domain: domain,
@@ -1284,9 +1605,10 @@
             }).then(res => {
                 if (res.ok === false) throw new Error(res.error || 'Lưu thất bại');
                 clearBlockForm();
-                st.textContent = '';
-                return loadBlockedDomains();
-            }).then(() => showToast('Đã cập nhật danh sách chặn', true))
+                st.textContent = 'Đã lưu; đang áp dụng nền...';
+                applyingInBackground(res, 'Domain saved');
+                return refreshAfterMutation(loadBlockedDomains());
+            })
             .catch(e => { st.textContent = ''; showToast(e.message, false); });
         }
 
@@ -1294,16 +1616,22 @@
             const d = cachedBlocked.find(x => x.id === id);
             if (!d) return;
             apiPost('/blocked_domain_save', { id: id, domain: d.domain, mode: d.mode || 'wildcard', enabled: String(enabled) })
-                .then(res => { if (res.ok === false) throw new Error(res.error); return loadBlockedDomains(); })
-                .then(() => showToast('Đã cập nhật', true))
+                .then(res => {
+                    if (res.ok === false) throw new Error(res.error);
+                    applyingInBackground(res, 'Domain rule saved');
+                    return refreshAfterMutation(loadBlockedDomains());
+                })
                 .catch(e => showToast(e.message, false));
         }
 
         function deleteBlockedDomain(id) {
             if (!confirm('Bỏ chặn domain này?')) return;
             apiPost('/blocked_domain_delete', { id: id })
-                .then(res => { if (res.ok === false) throw new Error(res.error); return loadBlockedDomains(); })
-                .then(() => showToast('Đã bỏ chặn', true))
+                .then(res => {
+                    if (res.ok === false) throw new Error(res.error);
+                    applyingInBackground(res, 'Domain deleted');
+                    return refreshAfterMutation(loadBlockedDomains());
+                })
                 .catch(e => showToast(e.message, false));
         }
 
@@ -1313,6 +1641,156 @@
             document.getElementById('block-mode').value = 'wildcard';
             document.getElementById('block-enabled').value = '1';
         }
+        // HTTP Debug
+        function loadHttpDebug() {
+            return apiGet('/http_debug').then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to load HTTP debug state');
+                httpDebugState = Object.assign({ enabled: '0', clients: [], rules: [] }, res || {});
+                document.getElementById('http-debug-enabled').value = httpDebugState.enabled === '1' ? '1' : '0';
+                const runtime = document.getElementById('http-debug-runtime');
+                const states = [
+                    httpDebugState.binary_ready ? 'Squid ready' : 'Squid missing',
+                    httpDebugState.running ? 'transparent capture running' : 'capture stopped',
+                    httpDebugState.ca_ready ? 'CA ready' : 'CA pending'
+                ];
+                runtime.textContent = states.join(' / ');
+                runtime.className = 'text-sm mt-1 ' + (httpDebugState.running ? 'text-green-600' : 'text-gray-500');
+                const caLink = document.getElementById('http-debug-ca-link');
+                caLink.href = basePath + '/http_debug_ca';
+                caLink.classList.toggle('opacity-50', !httpDebugState.ca_ready);
+                caLink.classList.toggle('pointer-events-none', !httpDebugState.ca_ready);
+                renderHttpDebugClients();
+                renderBlockedUrls();
+                return res;
+            }).catch(error => {
+                const runtime = document.getElementById('http-debug-runtime');
+                if (runtime) runtime.textContent = error.message;
+            });
+        }
+
+        function saveHttpDebugSettings() {
+            const enabled = document.getElementById('http-debug-enabled').value;
+            apiPost('/http_debug_save', { enabled: enabled }).then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to save HTTP debug state');
+                showToast(enabled === '1' ? 'HTTP debug enabled' : 'HTTP debug disabled', true);
+                window.setTimeout(loadHttpDebug, 2500);
+            }).catch(error => showToast(error.message, false));
+        }
+
+        function loadHttpDebugLog() {
+            return apiGet('/http_debug_log').then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to load HTTP debug log');
+                const output = document.getElementById('http-debug-log');
+                if (output) {
+                    output.value = (res.lines || []).join('\n');
+                    output.scrollTop = output.scrollHeight;
+                }
+            }).catch(error => {
+                const output = document.getElementById('http-debug-log');
+                if (output) output.value = error.message;
+            });
+        }
+
+        function renderHttpDebugClients() {
+            const body = document.getElementById('http-debug-clients-body');
+            if (!body) return;
+            body.innerHTML = '';
+            const selectedByIp = new Map((httpDebugState.clients || []).map(item => [item.ip, item]));
+            (cachedDevices || []).forEach(device => {
+                const selected = selectedByIp.get(device.ip);
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50';
+                row.innerHTML = '<td class="px-6 py-4 font-medium text-gray-800">' + h(device.hostname === 'unknown' ? 'Unknown' : device.hostname) + '</td>' +
+                    '<td class="px-6 py-4 font-mono text-xs">' + h(device.ip) + '</td>' +
+                    '<td class="px-6 py-4 font-mono text-xs text-gray-500">' + h(device.mac) + '</td>' +
+                    '<td class="px-6 py-4">' + (selected ? '<span class="badge vpn">Đang bắt log</span>' : '<span class="badge wan">Bỏ qua</span>') + '</td>' +
+                    '<td class="px-6 py-4 text-right"></td>';
+                const button = document.createElement('button');
+                button.className = selected ? 'btn-danger btn-tiny' : 'btn-secondary btn-tiny';
+                button.textContent = selected ? 'Dừng bắt log' : 'Bắt log';
+                button.addEventListener('click', () => setHttpDebugClient(device, selected || null));
+                row.lastElementChild.appendChild(button);
+                body.appendChild(row);
+            });
+            if (!cachedDevices.length) {
+                body.innerHTML = '<tr><td colspan="5" class="px-6 py-6 text-center text-gray-400">Không tìm thấy thiết bị LAN</td></tr>';
+            }
+        }
+
+        function setHttpDebugClient(device, selected) {
+            const request = selected
+                ? apiPost('/http_debug_client_delete', { id: selected.id })
+                : apiPost('/http_debug_client_save', { mac: device.mac, ip: device.ip, hostname: device.hostname, enabled: '1' });
+            request.then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to update proxy access');
+                showToast(selected ? 'Transparent capture removed' : 'Transparent capture selected', true);
+                return loadHttpDebug();
+            }).catch(error => showToast(error.message, false));
+        }
+
+        function saveBlockedUrl() {
+            const url = document.getElementById('blocked-url-value').value.trim();
+            if (!url) return showToast('Nhập URL cần chặn', false);
+            apiPost('/blocked_url_save', {
+                url: url,
+                method: document.getElementById('blocked-url-method').value,
+                enabled: document.getElementById('blocked-url-enabled').value
+            }).then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to save URL rule');
+                document.getElementById('blocked-url-value').value = '';
+                showToast('URL rule saved', true);
+                return loadHttpDebug();
+            }).catch(error => showToast(error.message, false));
+        }
+
+        function renderBlockedUrls() {
+            const body = document.getElementById('blocked-url-body');
+            if (!body) return;
+            body.innerHTML = '';
+            (httpDebugState.rules || []).forEach(rule => {
+                const enabled = rule.enabled !== '0';
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50';
+                row.innerHTML = '<td class="px-6 py-4 font-semibold text-gray-700">' + h(rule.method || '*') + '</td>' +
+                    '<td class="px-6 py-4 font-mono text-xs">' + h((rule.protocol || 'https') + '://' + rule.host + rule.path) + '</td>' +
+                    '<td class="px-6 py-4">' + (enabled ? '<span class="badge vpn">Bật</span>' : '<span class="badge wan">Tắt</span>') + '</td>' +
+                    '<td class="px-6 py-4 text-right space-x-2"></td>';
+                const toggle = document.createElement('button');
+                toggle.className = 'btn-secondary btn-tiny';
+                toggle.textContent = enabled ? 'Tắt' : 'Bật';
+                toggle.addEventListener('click', () => toggleBlockedUrl(rule, enabled ? '0' : '1'));
+                const remove = document.createElement('button');
+                remove.className = 'btn-danger btn-tiny';
+                remove.textContent = 'Xóa';
+                remove.addEventListener('click', () => deleteBlockedUrl(rule.id));
+                row.lastElementChild.append(toggle, remove);
+                body.appendChild(row);
+            });
+            if (!(httpDebugState.rules || []).length) {
+                body.innerHTML = '<tr><td colspan="4" class="px-6 py-6 text-center text-gray-400">Chưa có URL rule</td></tr>';
+            }
+        }
+
+        function toggleBlockedUrl(rule, enabled) {
+            apiPost('/blocked_url_save', {
+                id: rule.id,
+                url: rule.protocol + '://' + rule.host + rule.path,
+                method: rule.method,
+                enabled: enabled
+            }).then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to update URL rule');
+                return loadHttpDebug();
+            }).catch(error => showToast(error.message, false));
+        }
+
+        function deleteBlockedUrl(id) {
+            if (!confirm('Xóa URL rule này?')) return;
+            apiPost('/blocked_url_delete', { id: id }).then(res => {
+                if (res.ok === false) throw new Error(res.error || 'Unable to delete URL rule');
+                showToast('URL rule deleted', true);
+                return loadHttpDebug();
+            }).catch(error => showToast(error.message, false));
+        }
         // Shared / Audit
         function loadAudit() {
             return apiGet('/audit').then(d => {
@@ -1320,36 +1798,143 @@
             });
         }
 
+        let refreshAllInFlight = null;
+        let statusPollTimer = null;
+        let routePollTimer = null;
+        let devicePollTimer = null;
+        let statusPollActive = false;
+        let routePollActive = false;
+        let devicePollActive = false;
+        let activeTab = 'dashboard';
+        const STATUS_POLL_MS = 10000;
+        const ROUTE_POLL_MS = 60000;
+        const DEVICE_POLL_MS = 5000;
+
+        function refreshRouteViews() {
+            renderProfiles();
+            renderDevices();
+            renderWifiBindings();
+        }
+
         function refreshAll() {
-            return loadStatus()
-                .then(loadRouteStatus)
-                .then(loadProfiles)
-                .then(loadPolicies)
-                .then(loadDevices)
-                .then(() => loadWifiSettings(true))
-                .then(loadWifiBindings)
-                .then(loadMultiEbaySettings)
-                .then(loadSoftwareApiSettings)
-                .then(loadBlockedDomains)
-                .catch(() => showToast('Refresh cycle failed', false));
+            if (refreshAllInFlight) return refreshAllInFlight;
+
+            refreshAllInFlight = Promise.all([
+                loadStatus(),
+                loadApplyStatus(),
+                loadRouteStatus(),
+                loadProfiles(),
+                loadPolicies(),
+                loadDevices(),
+                loadWifiSettings(true),
+                loadWifiBindings(),
+                loadMultiEbaySettings(),
+                loadSoftwareApiSettings(),
+                loadBlockedDomains(),
+                loadHttpDebug()
+            ]).then(() => {
+                refreshRouteViews();
+            }).catch(() => {
+                showToast('Refresh cycle failed', false);
+            }).finally(() => {
+                refreshAllInFlight = null;
+            });
+
+            return refreshAllInFlight;
+        }
+
+        function scheduleStatusPoll(delay) {
+            window.clearTimeout(statusPollTimer);
+            statusPollTimer = null;
+            if (document.hidden) return;
+            statusPollTimer = window.setTimeout(runStatusPoll, delay == null ? STATUS_POLL_MS : delay);
+        }
+
+        function runStatusPoll() {
+            if (document.hidden) return;
+            if (statusPollActive) {
+                scheduleStatusPoll(STATUS_POLL_MS);
+                return;
+            }
+
+            statusPollActive = true;
+            Promise.all([loadStatus(), loadApplyStatus()])
+                .catch(() => {})
+                .finally(() => {
+                    statusPollActive = false;
+                    scheduleStatusPoll(STATUS_POLL_MS);
+                });
+        }
+
+        function scheduleRoutePoll(delay) {
+            window.clearTimeout(routePollTimer);
+            routePollTimer = null;
+            if (document.hidden) return;
+            routePollTimer = window.setTimeout(runRoutePoll, delay == null ? ROUTE_POLL_MS : delay);
+        }
+
+        function runRoutePoll() {
+            if (document.hidden) return;
+            if (routePollActive) {
+                scheduleRoutePoll(ROUTE_POLL_MS);
+                return;
+            }
+
+            routePollActive = true;
+            loadRouteStatus()
+                .then(refreshRouteViews)
+                .catch(() => {})
+                .finally(() => {
+                    routePollActive = false;
+                    scheduleRoutePoll(ROUTE_POLL_MS);
+                });
+        }
+
+        function scheduleDevicePoll(delay) {
+            window.clearTimeout(devicePollTimer);
+            devicePollTimer = null;
+            if (document.hidden || activeTab !== 'devices') return;
+            devicePollTimer = window.setTimeout(runDevicePoll, delay == null ? DEVICE_POLL_MS : delay);
+        }
+
+        function runDevicePoll() {
+            if (document.hidden || activeTab !== 'devices') return;
+            if (devicePollActive) {
+                scheduleDevicePoll(DEVICE_POLL_MS);
+                return;
+            }
+
+            devicePollActive = true;
+            loadDevices()
+                .catch(() => {})
+                .finally(() => {
+                    devicePollActive = false;
+                    scheduleDevicePoll(DEVICE_POLL_MS);
+                });
         }
 
         // Init
         document.addEventListener('DOMContentLoaded', () => {
             switchTab('dashboard', document.querySelector('.menu-tab'));
             refreshAll();
-            setInterval(() => {
-                loadStatus()
-                    .then(loadProfiles)
-                    .then(loadPolicies)
-                    .then(loadDevices)
-                    .catch(() => {});
-            }, 8000);
-            setInterval(() => {
-                loadRouteStatus()
-                    .then(loadProfiles)
-                    .catch(() => {});
-            }, 30000);
+            scheduleStatusPoll(STATUS_POLL_MS);
+            scheduleRoutePoll(ROUTE_POLL_MS);
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    window.clearTimeout(statusPollTimer);
+                    window.clearTimeout(routePollTimer);
+                    window.clearTimeout(devicePollTimer);
+                    statusPollTimer = null;
+                    routePollTimer = null;
+                    devicePollTimer = null;
+                    return;
+                }
+
+                scheduleStatusPoll(0);
+                scheduleRoutePoll(ROUTE_POLL_MS);
+                scheduleDevicePoll(0);
+            });
         });
 
     </script>

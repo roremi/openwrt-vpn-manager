@@ -1,0 +1,2 @@
+*.sh text eol=lf
+src/init.d/* text eol=lf

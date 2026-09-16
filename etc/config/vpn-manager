@@ -7,6 +7,7 @@ config global 'global'
     option multiebay_api_base 'https://multiebay.com'
     option multiebay_api_key ''
     option multiebay_allow_http_proxy '1'
+    option http_debug_enabled '0'
 
 config profile 'vpn_a'
     option enabled '0'
