@@ -14,6 +14,7 @@ UCI_DATA="$TMP_ROOT/uci-show.txt"
 LINK_DATA="$TMP_ROOT/links.txt"
 WG_DATA="$TMP_ROOT/handshakes.txt"
 FW4_DATA="$TMP_ROOT/fw4.txt"
+ROUTE_DATA="$TMP_ROOT/routes.txt"
 UCI_LOG="$TMP_ROOT/uci.log"
 IP_LOG="$TMP_ROOT/ip.log"
 WG_LOG="$TMP_ROOT/wg.log"
@@ -35,6 +36,7 @@ cat > "$FAKE_BIN/ip" <<'EOF'
 printf '%s\n' "$*" >> "$MONITOR_IP_LOG"
 case "$*" in
     '-o link show') cat "$MONITOR_LINK_DATA" ;;
+    '-4 route show table all') cat "$MONITOR_ROUTE_DATA" ;;
     *) printf 'unexpected ip invocation: %s\n' "$*" >&2; exit 92 ;;
 esac
 EOF
@@ -65,6 +67,7 @@ chmod 0755 "$FAKE_BIN/uci" "$FAKE_BIN/ip" "$FAKE_BIN/wg" "$FAKE_BIN/nft"
 : > "$IP_LOG"
 : > "$WG_LOG"
 : > "$NFT_LOG"
+: > "$ROUTE_DATA"
 : > "$STATE_DIR/health-snapshot.txt"
 
 i=1
@@ -73,10 +76,12 @@ while [ "$i" -le 500 ]; do
         printf 'vpn-manager.p%s=profile\n' "$i"
         printf "vpn-manager.p%s.enabled='1'\n" "$i"
         printf "vpn-manager.p%s.iface='wg_p%s'\n" "$i" "$i"
+        printf "vpn-manager.p%s.table_id='%s'\n" "$i" "$((100 + i))"
         printf "vpn-manager.p%s.private_key='secret-%s'\n" "$i" "$i"
     } >> "$UCI_DATA"
     printf '%s: wg_p%s: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 state UNKNOWN\n' "$i" "$i" >> "$LINK_DATA"
     printf 'wg_p%s peer-%s 2000000000\n' "$i" "$i" >> "$WG_DATA"
+    printf 'default dev wg_p%s scope link table %s\n' "$i" "$((100 + i))" >> "$ROUTE_DATA"
     printf 'p%s|wg_p%s|healthy|0|2000000000\n' "$i" "$i" >> "$STATE_DIR/health-snapshot.txt"
     i=$((i + 1))
 done
@@ -106,6 +111,7 @@ export MONITOR_UCI_DATA="$UCI_DATA"
 export MONITOR_LINK_DATA="$LINK_DATA"
 export MONITOR_WG_DATA="$WG_DATA"
 export MONITOR_FW4_DATA="$FW4_DATA"
+export MONITOR_ROUTE_DATA="$ROUTE_DATA"
 export MONITOR_UCI_LOG="$UCI_LOG"
 export MONITOR_IP_LOG="$IP_LOG"
 export MONITOR_WG_LOG="$WG_LOG"
@@ -122,11 +128,22 @@ assert_eq 1 "$(wc -l < "$WG_LOG" | tr -d ' ')" "health sweep must read handshake
 assert_eq 0 "$(awk '$0 ~ /(^| )get( |$)/ { count++ } END { print count+0 }' "$UCI_LOG")" "health sweep used per-profile UCI gets"
 
 : > "$UCI_LOG"
+: > "$IP_LOG"
 sh "$ROOT_DIR/scripts/vpn-watchdog.sh"
 
 assert_eq 1 "$(wc -l < "$UCI_LOG" | tr -d ' ')" "watchdog must read UCI once"
 assert_eq 1 "$(wc -l < "$NFT_LOG" | tr -d ' ')" "watchdog must inspect fw4 once"
+assert_eq 1 "$(awk '$0 == "-4 route show table all" { count++ } END { print count+0 }' "$IP_LOG")" "watchdog must inspect policy routes once"
 assert_eq 0 "$(awk '$0 ~ /(^| )get( |$)/ { count++ } END { print count+0 }' "$UCI_LOG")" "watchdog used per-record UCI gets"
 [ ! -s "$STATE_DIR/apply.queue" ] || fail "valid WiFi forwarding rules queued an unnecessary refresh"
+
+# Losing a custom-table default route must queue PBR repair even while the
+# WireGuard link, rules, WiFi bridge, and firewall forwarding remain present.
+sed -i '/table 101$/d' "$ROUTE_DATA"
+: > "$UCI_LOG"
+: > "$IP_LOG"
+sh "$ROOT_DIR/scripts/vpn-watchdog.sh"
+assert_eq "pbr" "$(awk -F'|' 'NR == 1 { print $2 }' "$STATE_DIR/apply.queue")" "missing profile route did not queue PBR repair"
+assert_eq 1 "$(awk '$0 == "-4 route show table all" { count++ } END { print count+0 }' "$IP_LOG")" "route-loss check scanned routes more than once"
 
 echo "monitor snapshot scaling: ok"
